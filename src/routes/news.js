@@ -49,4 +49,22 @@ router.post('/extract', async (req, res) => {
   }
 });
 
+router.post('/embed-image', async (req, res) => {
+  const { url } = req.body || {};
+
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: 'URL de imagem inválida' });
+  }
+
+  try {
+    const dataUrl = await embedImage(url);
+    return res.json({ dataUrl });
+  } catch (error) {
+    return res.status(422).json({
+      error: 'Não foi possível baixar a imagem',
+      detail: error.message,
+    });
+  }
+});
+
 module.exports = router;

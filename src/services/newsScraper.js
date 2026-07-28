@@ -6,9 +6,38 @@ const USER_AGENT =
 
 function cleanText(value, limit) {
   if (!value) return null;
-  const text = String(value).trim();
+  const text = String(value).replace(/\s+/g, ' ').trim();
   if (!text.length) return null;
   return limit ? text.substring(0, limit) : text;
+}
+
+function extractChapeu($) {
+  // Layout antigo da A Gazeta.
+  const legacyChapeu = cleanText(
+    $('label.text-tw-theme-box-kicker-default[id^="kicker-"]').first().text(),
+    80
+  );
+
+  if (legacyChapeu) return legacyChapeu;
+
+  // Layout atual (Netdeal): o chapéu fica na seção imediatamente anterior
+  // à seção do título. As classes ND... são geradas dinamicamente, então a
+  // relação entre as seções é mais estável do que seus nomes.
+  const titleEl = $('h1')
+    .filter((_, element) => cleanText($(element).text()))
+    .first();
+  const titleSection = titleEl.closest('.ND_PAGE_SECTION');
+  if (!titleSection.length) return null;
+
+  const kickerSection = titleSection.prevAll('.ND_PAGE_SECTION').first();
+  if (!kickerSection.length) return null;
+
+  const chapeu = cleanText(
+    kickerSection.find('.nd-element-textable').first().text(),
+    80
+  );
+
+  return chapeu;
 }
 
 async function fetch(url) {
@@ -37,8 +66,7 @@ async function fetch(url) {
     $('img').first().attr('src') ||
     null;
 
-  const kickerEl = $('label.text-tw-theme-box-kicker-default[id^="kicker-"]').first();
-  const chapeu = kickerEl.text() || null;
+  const chapeu = extractChapeu($);
 
   return {
     h1: cleanText(h1, 120),
@@ -50,4 +78,5 @@ async function fetch(url) {
 
 module.exports = {
   fetch,
+  extractChapeu,
 };

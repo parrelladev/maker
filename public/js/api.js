@@ -29,5 +29,23 @@
     }
   }
 
-  global.Api = { loadManifest, extractNewsData };
+  async function embedImage(url) {
+    const response = await fetch('/api/news/embed-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.detail || data.error || 'Não foi possível baixar a imagem');
+    }
+    if (!data.dataUrl) {
+      throw new Error('O servidor não retornou uma imagem válida');
+    }
+
+    return data.dataUrl;
+  }
+
+  global.Api = { loadManifest, extractNewsData, embedImage };
 })(window);

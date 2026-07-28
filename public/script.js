@@ -691,7 +691,7 @@ async function ensurePreviewInitialized() {
   return manifestData;
 }
 
-function buildPreviewData(manifestData) {
+function buildPreviewData(manifestData, backgroundOverride = null) {
   const url = newsUrl.value.trim();
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
   const extractedData = hasMatchingNews ? lastNewsData : {};
@@ -705,7 +705,7 @@ function buildPreviewData(manifestData) {
   const effectiveSubtitle = manualSubtitle || extractedData.h2 || '';
   const extractedChapeu = extractedData.chapeu || '';
   const effectiveTag = manualTag || extractedChapeu || '';
-  const effectiveBg = manualBg || extractedData.bg || '';
+  const effectiveBg = backgroundOverride || manualBg || extractedData.bg || '';
 
   const logoField = manifestData.manifest?.logoField || 'logo';
   const defaultLogo = manifestData.manifest?.defaultLogo || 'logo-a-gazeta';
@@ -759,7 +759,7 @@ function buildPreviewData(manifestData) {
   return data;
 }
 
-async function updatePreview() {
+async function updatePreview(backgroundOverride = null) {
   if (!previewFrame || !currentTemplate) {
     return;
   }
@@ -773,7 +773,7 @@ async function updatePreview() {
       return;
     }
 
-    const payload = buildPreviewData(manifestData);
+    const payload = buildPreviewData(manifestData, backgroundOverride);
     frameWindow.__updatePreview(payload);
   } catch (error) {
     console.error('Erro ao atualizar preview:', error);
@@ -838,8 +838,11 @@ async function generateArtWithPreviewFlow() {
     }
 
     const pageName = manifestData.page || 'index';
+    const exportBg = /^https?:\/\//i.test(effectiveBg)
+      ? await window.Api.embedImage(effectiveBg)
+      : effectiveBg;
 
-    await updatePreview();
+    await updatePreview(exportBg);
     await window.PreviewExport.downloadPreview(
       previewFrame,
       manifestData,
