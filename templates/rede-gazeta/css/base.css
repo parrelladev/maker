@@ -26,7 +26,7 @@ html, body {
   --photo-height: clamp(320px, 35vh, 675px);
   --pad-x: clamp(42px, 7vw, 120px);
   --pad-y: clamp(48px, 9vh, 128px);
-  --logo-size: clamp(120px, 30vw, 200px);
+  --logo-size: clamp(42px, 10vw, 70px);
   --tag-gap: clamp(28px, 5vh, 60px);
 }
 
