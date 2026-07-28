@@ -1,257 +1,155 @@
-# Gerador de Artes
+# Maker
 
-Ferramenta Node.js para gerar imagens PNG a partir de HTML/CSS e metadados de notícias.  
-O sistema recebe dados (título, subtítulo, imagem, logo etc.), aplica em templates versionados com manifests por página e usa um navegador headless (Puppeteer/Chromium) rodando em segundo plano para renderizar a arte como imagem.
+Aplicação web para criar artes PNG a partir de templates HTML/CSS e dados de notícias.
 
----
+O template é renderizado em um `iframe` no navegador. Ao clicar em **Criar**, o próprio preview é convertido em PNG com `html-to-image`, nas dimensões definidas pelo manifest. O servidor não executa Chromium, Puppeteer nem mantém uma fila de geração.
 
-## 1. Começando rápido
+## Requisitos
 
-### Requisitos
-- Node.js 16+  
+- Node.js 18 ou superior
 - npm
 
-### Passo a passo
-1. Instalar dependências:
-   ```bash
-   npm install
-   ```
-2. (Opcional) Gerar `config.js` interativo:
-   ```bash
-   npm run deploy
-   # ou copie config.example.js para config.js
-   ```
-3. Subir o servidor em modo desenvolvimento:
-   ```bash
-   npm run dev
-   # ou
-   npm start
-   ```
-4. Acessar no navegador:
-   - `http://localhost:3000`
+## Executando localmente
 
-> Para deploy em servidor (produção), veja `DEPLOY.md`.
-
----
-
-## 2. Configuração
-
-A aplicação lê variáveis de ambiente e/ou `config.js`.
-
-- `PORT`: porta do servidor (padrão `3000`)
-- `OUTPUT_DIR`: pasta onde os PNGs são salvos
-- `PUBLIC_OUTPUT_DIR`: caminho público para servir os arquivos gerados
-
-Prioridade:
-1. Variáveis de ambiente (`PORT`, `OUTPUT_DIR`, `PUBLIC_OUTPUT_DIR`)
-2. Valores em `config.js`
-3. Defaults internos
-
-Para gerar `config.js`:
 ```bash
-npm run deploy
+npm install
+npm run dev
 ```
 
----
+Acesse `http://localhost:3000`.
 
-## 3. Uso via API
+Para iniciar sem recarga automática:
 
-Servidor expõe uma API REST simples.
-
-### `POST /api/generate`
-Gera artes com base em templates cadastrados **salvando os PNGs em disco** (pasta `OUTPUT_DIR`).
-
-Body (exemplo):
-```json
-{
-  "artes": [
-    {
-      "template": "nome-do-template",
-      "page": "slug-da-pagina",
-      "bg": "https://url.da.imagem/bg.jpg",
-      "logo": "logo-a-gazeta.svg",
-      "h1": "Título da matéria",
-      "h2": "Subtítulo",
-      "tag": "Política"
-    }
-  ]
-}
+```bash
+npm start
 ```
 
-Resposta (exemplo):
-```json
-{
-  "files": [
-    "/caminho/para/output/arquivo.png"
-  ],
-  "logs": [
-    "[ok] template/pagina"
-  ]
-}
+## Configuração
+
+A única configuração necessária é a porta HTTP:
+
+```bash
+PORT=3000 npm start
 ```
 
-Comportamento:
-- 409 se já houver geração em andamento.
-- 500 se todas as artes falharem (detalhes em `logs`). Os arquivos gerados (quando houver) ficam em `OUTPUT_DIR`.
+Também é possível copiar `config.example.js` para `config.js` ou executar `npm run deploy` para criar esse arquivo interativamente. A variável `PORT` tem prioridade.
 
-### `POST /api/generate/download`
-Gera **uma** arte e devolve o PNG direto na resposta HTTP (sem persistir o arquivo).
+## Fluxo da aplicação
 
-Body (exemplo):
+1. O usuário seleciona um template.
+2. A interface solicita HTML, CSS e manifest em `/api/templates/:template/:page`.
+3. Ao informar uma notícia, `/api/news/extract` extrai título, subtítulo, chapéu e imagem.
+4. A imagem extraída é incorporada como data URL para não bloquear a exportação por CORS.
+5. O runtime de bindings aplica os dados ao DOM do iframe.
+6. `html-to-image` captura o iframe no tamanho do manifest e inicia o download do PNG.
+
+Não existe uma segunda renderização no backend: o arquivo baixado é produzido a partir do mesmo DOM exibido no preview.
+
+## API
+
+### `GET /api/templates`
+
+Lista os templates e páginas disponíveis.
+
+### `GET /api/templates/:template/:page`
+
+Retorna manifest, HTML, CSS e logo resolvida da página.
+
+### `POST /api/news/extract`
+
+Extrai os dados usados pela arte.
+
 ```json
 {
-  "arte": {
-    "template": "nome-do-template",
-    "page": "slug-da-pagina",
-    "bg": "https://url.da.imagem/bg.jpg",
-    "logo": "logo-a-gazeta.svg",
-    "h1": "Título da matéria",
-    "h2": "Subtítulo"
-  }
+  "url": "https://exemplo.com/noticia"
 }
 ```
 
 Resposta:
-- `Content-Type: image/png`
-- `Content-Disposition: attachment; filename="nome-gerado.png"`
 
-Esse endpoint é útil para fluxos de download imediato (por exemplo, integração com outra ferramenta que faz upload do PNG para redes sociais).
-
-### `GET /api/templates`
-Lista templates/páginas disponíveis (baseado nos manifests).
-
-### `GET /api/templates/:template/:page`
-Retorna detalhes do manifest, HTML e CSS daquela página.
-
-### `POST /api/news/extract`
-Extrai dados de uma notícia a partir de uma URL (usado para montar posts a partir de matérias).
-
-Body:
-```json
-{ "url": "https://exemplo.com/materia" }
-```
-
-Resposta (exemplo):
 ```json
 {
   "h1": "Título",
   "h2": "Subtítulo",
-  "bg": "https://imagem-da-materia.jpg",
-  "chapeu": "Categoria ou chapeu da materia (null quando ausente)"
+  "chapeu": "Categoria",
+  "bg": "data:image/jpeg;base64,...",
+  "bgSource": "https://exemplo.com/imagem.jpg"
 }
 ```
 
-Esses campos podem ser usados diretamente no payload de `/api/generate` ou `/api/generate/download` para transformar a notícia em arte/post para redes sociais.
+O download do PNG não possui endpoint: ele acontece no navegador.
 
----
+## Templates
 
-## 4. Como funciona por baixo dos panos
+Cada página de template contém seu HTML e manifest. CSS e fontes compartilhadas ficam no diretório do template.
 
-Fluxo simplificado:
-- A API valida o payload recebido contra o `manifest.json` da página (campos obrigatórios, tipos etc.).
-- O serviço de templates carrega o `index.html` e os CSS do template.
-- O serviço de bindings aplica os dados (título, subtítulo, imagem, logo, tags) nos elementos HTML, conforme o manifest.
-- O `generator.js` inicia um navegador headless via Puppeteer (Chromium em modo oculto), abre a página já montada e gera um screenshot no tamanho configurado, salvando em PNG.
-
-Implica em:
-- O processo Node roda um navegador em segundo plano durante a geração.
-- Servidores precisam suportar a execução do Chromium headless (bibliotecas de sistema padrão em Linux/Windows).
-
----
-
-## 5. Templates e manifests
-
-Cada template é organizado por pasta, com HTML/CSS/manifest.
-
-Estrutura básica:
 ```text
 templates/
   <template>/
-    css/              # CSS e fontes compartilhadas
-    fonts/            # (opcional)
+    css/
+    fonts/                 # opcional
     <page>/
-      index.html      # layout específico da página
-      manifest.json   # definição de campos/bindings
+      index.html
+      manifest.json
 ```
 
-No `index.html`, o CSS do template é referenciado, por exemplo:
-```html
-<link rel="stylesheet" href="../css/base.css">
+O manifest define:
+
+- dimensões da arte;
+- logo padrão;
+- bindings de texto, HTML, imagem e logo;
+- variáveis CSS, classes e atributos dinâmicos.
+
+Exemplo de binding:
+
+```json
+{
+  "selector": "#title",
+  "type": "text",
+  "field": "h1"
+}
 ```
 
-O `manifest.json` define:
-- Dimensões da arte (`width`, `height`)
-- Campo de logo obrigatório (`logoField`) e fallback (`defaultLogo`)
-- Bindings de elementos (`text`, `html`, `image`, `logo`, `class`, `style`, `dataset`, `attribute`)
-
-Erros de binding/validação aparecem nos logs da geração com o formato:
-- `[erro] template/pagina`
-
-> Para uma visão prática dos templates de stories e seus previews, veja `public/previews/stories/README.md`.
-
----
-
-## 6. Estrutura de pastas (resumo)
+## Estrutura principal
 
 ```text
 src/
-  server.js              # servidor Express e rotas
-  routes/                # /api/generate, /api/templates, /api/news
+  server.js
+  appConfig.js
+  routes/
+    news.js
+    templates.js
   services/
-    generator.js         # orquestra geração e chama os módulos de geração
-    newsScraper.js       # extrai título/subtítulo/imagem/chapéu de notícias
+    newsScraper.js
   lib/
-    binding.js           # aplica bindings no DOM (backend)
-    manifestLoader.js    # carrega manifests/templates
-  modules/
-    generation/
-      errors.js          # erro de domínio da geração (GeneratorError)
-      arteValidator.js   # validação de payload (Zod + normalizações)
-      assetResolver.js   # resolução de assets (logos, backgrounds, remoto/local)
-      renderService.js   # renderizações com Puppeteer + binding
+    assetResolver.js
+    manifestLoader.js
 
-templates/               # HTML/CSS/fonts + manifests por página
-input/                   # assets locais (backgrounds/logos)
-output/                  # PNGs gerados
-public/                  # interface web, previews etc.
-  index.html             # UI principal (seleção de template, modal de geração)
-  script.js              # lógica da UI (preview, formulário, integrações)
+public/
+  index.html
+  script.js
   js/
-    api.js               # chamadas HTTP a /api/* (manifests, geração, extração de notícia)
-  previews/              # imagens de preview dos templates
-config.example.js        # exemplo de configuração
-config.js                # configuração ativa (opcional)
+    api.js
+    preview-export.js
+  vendor/
+    html-to-image.js
+
+templates/                 # layouts, manifests, CSS e fontes
+input/                     # logos e outros assets locais
 ```
 
----
+## CORS e imagens
 
-## 7. Preview e fluxo de geração
+Imagens encontradas pelo scraper são baixadas pelo servidor e incorporadas no retorno, portanto não dependem do CORS da origem.
 
-Fluxo simplificado na interface web:
-- O usuário escolhe um template de story na lista da tela inicial.
-- Ao abrir o modal, a UI consulta `/api/templates/:template/:page` (via `Api.loadManifest`) para obter HTML, CSS e manifest daquela página.
-- Quando o usuário informa a URL de uma notícia, a UI chama `/api/news/extract` (via `Api.extractNewsData`) para sugerir título, subtítulo, imagem e chapéu.
-- O preview é montado em um `iframe` aplicando um pequeno runtime de binding baseado no manifest, de forma que o visual do preview reflita o que o Puppeteer irá renderizar.
-- Quando o usuário clica em **Criar**, a UI monta o payload de arte (template, página, campos de texto, background, tema e logo) e chama `/api/generate/download` (via `Api.downloadGeneratedArtwork`) para fazer o download imediato do PNG.
+Uma URL digitada diretamente no campo **Imagem manual** ainda precisa permitir leitura cross-origin. Se não permitir, a exportação é interrompida com uma mensagem de erro em vez de produzir uma arte sem imagem.
 
-O backend usa os módulos em `src/modules/generation` para validar o payload, resolver assets, aplicar bindings e gerar o screenshot em PNG com Puppeteer.
+## Operação
 
----
+- O servidor não inicia processos de navegador.
+- Cada cliente realiza sua própria exportação.
+- Não existe fila global nem resposta `409` por geração concorrente.
+- A imagem extraída possui limite de 12 MB e timeout de 15 segundos.
+- O bundle de `html-to-image` 1.11.13 fica versionado em `public/vendor`, sem instalação adicional nem dependência de CDN em produção.
 
-## 8. Operação e manutenção
-
-- Concorrência: `generator.run` evita execuções simultâneas; novas chamadas recebem 409 se houver job em andamento.
-- Limpeza: esvazie periodicamente a pasta `output/` conforme política interna.
-- Logs: erros e avisos são retornados na resposta da API (`logs`) e no console do servidor.
-- Testes:
-  ```bash
-  npm test
-  ```
-
----
-
-## 9. Documentação complementar
-
-Para detalhes específicos:
-- `DEPLOY.md` — passo a passo de deploy em Linux/Windows, exemplos de proxy (Nginx/Apache), variáveis de ambiente e troubleshooting em produção.
-- `public/previews/stories/README.md` — lista de templates de stories, slugs e nomes de arquivo de preview (`.png`) para exibir as miniaturas na interface.
+Veja [DEPLOY.md](DEPLOY.md) para publicação em produção.

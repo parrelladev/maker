@@ -499,7 +499,7 @@ async function ensurePreviewInitialized() {
 
   const manifestJson = JSON.stringify(manifestData.manifest || {});
 
-  // Pequeno runtime de binding para o preview, baseado em src/lib/binding.js
+  // Runtime de binding usado pelo preview e pela exportação client-side.
   const bindingScript = `
     (function () {
       var manifest = ${manifestJson};
@@ -675,6 +675,7 @@ async function ensurePreviewInitialized() {
     </head>
     <body>
       ${manifestData.html}
+      <script src="/vendor/html-to-image.js"><\/script>
       <script>${bindingScript}<\/script>
     </body>
   </html>`;
@@ -820,110 +821,8 @@ async function generateArtWithPreviewFlow() {
       customTag.value = extractedChapeu;
     }
 
-    const manualTitle = customTitle.value.trim();
-    const manualSubtitle = customSubtitle.value.trim();
     const manualTag = customTag.value.trim();
-    const manualBg = imageOverride;
-
-    const resolvedTitle = manualTitle || extractedData.h1 || null;
-    const resolvedSubtitle = manualSubtitle || extractedData.h2 || null;
     const resolvedChapeu = manualTag || extractedChapeu || '';
-    const effectiveBg = manualBg || extractedData.bg || null;
-
-    if (!resolvedChapeu) {
-      showToast('Por favor, insira a categoria da notícia', 'error');
-      customTag.focus();
-      return;
-    }
-
-    if (!effectiveBg) {
-      showToast('Não encontramos uma imagem válida. Informe um link de imagem ou tente novamente.', 'error');
-      customImageUrl.focus();
-      return;
-    }
-
-    const logoField = manifestData.manifest?.logoField || 'logo';
-    const defaultLogo = manifestData.manifest?.defaultLogo || 'logo-a-gazeta';
-    const pageName = manifestData.page || 'index';
-
-    const artData = {
-      template: currentTemplate,
-      page: pageName,
-      h1: resolvedTitle,
-      h2: resolvedSubtitle,
-      tag: resolvedChapeu,
-      chapeu: extractedChapeu,
-      bg: effectiveBg,
-      sourceUrl: url
-    };
-
-    const parameters = {};
-    if (currentTheme) {
-      parameters.theme = currentTheme;
-    }
-    if (Object.keys(parameters).length) {
-      artData.parameters = parameters;
-    }
-
-    artData[logoField] = defaultLogo;
-
-      await window.Api.downloadGeneratedArtwork(artData);
-
-    showToast('Arte gerada e download iniciado!', 'success');
-  } catch (error) {
-    console.error('Erro ao gerar arte:', error);
-    showToast('Erro ao gerar arte: ' + error.message, 'error');
-  } finally {
-    hideLoading();
-  }
-}
-
-async function generateArt() {
-  const url = newsUrl.value.trim();
-  const manualTag = customTag.value.trim();
-  const imageOverride = customImageUrl.value.trim();
-
-  if (!currentTemplate) {
-    showToast('Escolha um template antes de gerar a arte', 'error');
-    return;
-  }
-
-  if (!url) {
-    showToast('Por favor, insira o link da notícia', 'error');
-    newsUrl.focus();
-    return;
-  }
-
-  if (!isValidUrl(url)) {
-    showToast('Por favor, insira um link válido', 'error');
-    newsUrl.focus();
-    return;
-  }
-
-  if (imageOverride && !isValidUrl(imageOverride)) {
-    showToast('Informe um link de imagem válido (http ou https).', 'error');
-    customImageUrl.focus();
-    return;
-  }
-
-  try {
-    showLoading();
-
-    const manifestData = await loadManifest(currentTemplate, 'index');
-    const logoField = manifestData.manifest?.logoField || 'logo';
-    const defaultLogo = manifestData.manifest?.defaultLogo || 'logo-a-gazeta';
-    const pageName = manifestData.page || 'index';
-
-    const extractedData = (await window.Api.extractNewsData(url)) || {};
-    const extractedChapeu = extractedData.chapeu || null;
-
-    if (!manualTag && extractedChapeu) {
-      customTag.value = extractedChapeu;
-    }
-
-    const resolvedTitle = customTitle.value.trim() || extractedData.h1 || null;
-    const resolvedSubtitle = customSubtitle.value.trim() || extractedData.h2 || null;
-    const resolvedChapeu = customTag.value.trim() || extractedChapeu || '';
     const effectiveBg = imageOverride || extractedData.bg || null;
 
     if (!resolvedChapeu) {
@@ -938,31 +837,16 @@ async function generateArt() {
       return;
     }
 
-    const artData = {
-      template: currentTemplate,
-      page: pageName,
-      h1: resolvedTitle,
-      h2: resolvedSubtitle,
-      tag: resolvedChapeu,
-      chapeu: extractedChapeu,
-      bg: effectiveBg,
-      sourceUrl: url
-    };
+    const pageName = manifestData.page || 'index';
 
-    const parameters = {};
-    if (currentTheme) {
-      parameters.theme = currentTheme;
-    }
-    if (Object.keys(parameters).length) {
-      artData.parameters = parameters;
-    }
-
-    artData[logoField] = defaultLogo;
-
-      await window.Api.downloadGeneratedArtwork(artData);
+    await updatePreview();
+    await window.PreviewExport.downloadPreview(
+      previewFrame,
+      manifestData,
+      `${currentTemplate}-${pageName}.png`,
+    );
 
     showToast('Arte gerada e download iniciado!', 'success');
-    closeModalHandler();
   } catch (error) {
     console.error('Erro ao gerar arte:', error);
     showToast('Erro ao gerar arte: ' + error.message, 'error');

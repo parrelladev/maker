@@ -1,262 +1,59 @@
-# Deploy no Servidor
+# Deploy do Maker
 
-Guia rápido para colocar o Maker em produção em um servidor Linux ou Windows.
+O Maker é um servidor Express convencional. A geração do PNG acontece no navegador do usuário, portanto o servidor não precisa de Chromium, Puppeteer ou bibliotecas gráficas.
 
----
-
-## 1. Pré-requisitos
-
-- Node.js 16+ instalado no servidor
-- Acesso ao servidor (SSH ou RDP)
-- Permissão para criar pastas e executar processos Node
-
----
-
-## 2. Deploy rápido
-
-### 2.1. Enviar o projeto para o servidor
-
-Copie o conteúdo do repositório para o servidor, por exemplo:
+## Instalação
 
 ```bash
-# Linux
-/var/www/artes/
-
-# Windows
-C:\inetpub\wwwroot\artes\
+npm ci --omit=dev
+PORT=3000 npm start
 ```
 
-### 2.2. Instalar dependências
+No Windows PowerShell:
 
-```bash
-cd /caminho/para/gerador-artes
-npm install
+```powershell
+$env:PORT = 3000
+npm start
 ```
 
-### 2.3. Configurar (opção simples)
-
-Gere um `config.js` interativo:
+Também é possível criar `config.js` com:
 
 ```bash
 npm run deploy
 ```
 
-Ou copie e edite manualmente:
+## Proxy reverso
 
-```bash
-cp config.example.js config.js            # Linux
-REM copy config.example.js config.js      # Windows
-```
+O proxy deve encaminhar a aplicação inteira, incluindo:
 
-As variáveis de ambiente `PORT`, `OUTPUT_DIR` e `PUBLIC_OUTPUT_DIR` sempre têm prioridade sobre `config.js`.
+- `/api/templates/*`
+- `/api/news/*`
+- `/templates/*`
+- `/input/*`
+- `/vendor/*`
 
-### 2.4. Subir o servidor
-
-```bash
-# recomendado
-npm start
-
-# alternativa
-node src/server.js
-```
-
-Por padrão o servidor roda na porta `3000` (ou na porta definida em `PORT`/`config.js`).
-
----
-
-## 3. Configuração de ambiente
-
-Você pode configurar via `.env` (se o seu gerenciador suportar) ou direto no shell.
-
-### 3.1. Variáveis principais
-
-```bash
-# Porta do servidor
-PORT=3000
-
-# Pasta onde salvar as artes (no disco do servidor)
-OUTPUT_DIR=/var/www/artes/output
-
-# Caminho público para download das artes
-PUBLIC_OUTPUT_DIR=/artes/output
-```
-
-Exemplo Linux (sem `.env`):
-
-```bash
-PORT=3000 OUTPUT_DIR=/var/www/artes/output PUBLIC_OUTPUT_DIR=/artes/output node src/server.js
-```
-
-Exemplo Windows (CMD):
-
-```cmd
-set PORT=3000
-set OUTPUT_DIR=C:\inetpub\wwwroot\artes\output
-set PUBLIC_OUTPUT_DIR=/artes/output
-node src/server.js
-```
-
----
-
-## 4. Proxy reverso (opcional)
-
-Use um proxy para expor o serviço em porta 80/443.
-
-### 4.1. Nginx
+Exemplo de Nginx:
 
 ```nginx
 server {
     listen 80;
-    server_name artes.empresa.com;
+    server_name maker.exemplo.com;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /artes/output/ {
-        alias /var/www/artes/output/;
-        expires 1h;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-### 4.2. Apache
+## Observações de produção
 
-```apache
-<VirtualHost *:80>
-    ServerName artes.empresa.com
-
-    ProxyPreserveHost On
-    ProxyPass / http://localhost:3000/
-    ProxyPassReverse / http://localhost:3000/
-
-    Alias /artes/output /var/www/artes/output
-    <Directory "/var/www/artes/output">
-        Options Indexes
-        AllowOverride None
-        Require all granted
-    </Directory>
-</VirtualHost>
-```
-
----
-
-## 5. Atualização de versão
-
-1. Parar o servidor (se em primeiro plano, `Ctrl+C`).
-2. Fazer backup opcional da pasta atual.
-3. Substituir o código pela nova versão (git pull ou novo upload).
-4. Rodar `npm install` se houver mudanças de dependências.
-5. Subir novamente com `npm start`.
-
-Comandos úteis:
-
-```bash
-# encontrar processo Node (Linux)
-ps aux | grep node
-
-# checar porta (Linux)
-lsof -i :3000
-
-# checar porta (Windows)
-netstat -ano | findstr :3000
-```
-
----
-
-## 6. Estrutura típica em produção
-
-Exemplo em `/var/www/artes` (Linux) ou `C:\inetpub\wwwroot\artes` (Windows):
-
-```text
-/var/www/artes/
-  src/
-    server.js              # servidor Express
-    routes/                # /api/generate, /api/templates, /api/news
-    services/
-      generator.js         # orquestra geração e chama os módulos de geração
-      newsScraper.js       # extração de dados de notícias
-    lib/
-      binding.js           # runtime de binding no backend
-      manifestLoader.js    # carregamento de templates/manifests
-    modules/
-      generation/
-        errors.js          # erro de domínio da geração (GeneratorError)
-        arteValidator.js   # validação de payload (Zod + normalizações)
-        assetResolver.js   # resolução de assets (logos, backgrounds, remoto/local)
-        renderService.js   # renderizações com Puppeteer + binding
-  deploy.js                # assistente para gerar config.js
-  config.example.js        # exemplo de configuração
-  config.js                # configuração ativa (opcional)
-  package.json
-  package-lock.json
-  public/                  # interface web, previews
-    index.html             # UI principal
-    script.js              # lógica de UI (preview, formulário)
-    js/
-      api.js               # chamadas HTTP para /api/*
-    previews/              # imagens de preview dos templates
-  templates/               # templates HTML/CSS/manifests
-  input/                   # assets locais
-  output/                  # artes geradas (PNG)
-  node_modules/
-```
-
----
-
-## 7. Segurança básica
-
-### 7.1. Firewall
-
-```bash
-# Exemplo: permitir apenas porta 3000 (Linux + ufw)
-ufw allow 3000
-```
-
-### 7.2. Permissões
-
-```bash
-chown -R www-data:www-data /var/www/artes/
-chmod -R 755 /var/www/artes/
-```
-
-### 7.3. HTTPS
-
-Recomendado usar HTTPS via proxy reverso (Let's Encrypt, Cloudflare ou outro provedor).
-
----
-
-## 8. Troubleshooting rápido
-
-**Port 3000 already in use**
-
-```bash
-lsof -i :3000                   # Linux
-netstat -ano | findstr :3000    # Windows
-```
-
-Pare o processo em conflito ou use outra porta (`PORT=3001`).
-
-**Permission denied**
-
-```bash
-chmod -R 755 /var/www/artes/
-```
-
-**Cannot find module**
-
-```bash
-rm -rf node_modules package-lock.json
-npm install
-```
-
----
-
-## 9. Verificações finais
-
-- Interface web: `http://servidor:3000` ou URL configurada no proxy.
-- Downloads de artes: caminho configurado em `PUBLIC_OUTPUT_DIR` (ex.: `/artes/output/`).
-- Log de erros: console do Node no servidor.
-- Pastas importantes: `templates/`, `input/`, `output/`.
+- Não é necessário persistir uma pasta de saída: o PNG é baixado diretamente pelo navegador.
+- O servidor precisa de acesso HTTP às páginas de notícia e às imagens extraídas.
+- Configure limites de requisição e timeout no proxy considerando que a imagem incorporada pode ter até 12 MB.
+- Sirva a aplicação por HTTPS para evitar bloqueios de conteúdo misto ao usar fontes ou imagens externas.
+- Monitore CPU e memória do processo Node; não devem existir processos Chromium filhos.

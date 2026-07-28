@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { listTemplates, loadManifest } = require('../lib/manifestLoader');
-const { resolveLogoAsset } = require('../modules/generation/assetResolver');
+const { resolveLogoAsset } = require('../lib/assetResolver');
 
 const router = express.Router();
 

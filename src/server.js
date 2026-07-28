@@ -1,8 +1,6 @@
 const express = require('express');
-const path = require('path');
 const config = require('./appConfig');
 
-const generateRouter = require('./routes/generate');
 const templatesRouter = require('./routes/templates');
 const newsRouter = require('./routes/news');
 
@@ -13,9 +11,7 @@ app.use(express.static('public'));
 app.use('/input', express.static('input'));
 // expリe templates (HTML/CSS/fonts) para o preview no navegador
 app.use('/templates', express.static('templates'));
-app.use(config.publicOutputDir, express.static(config.outputDir));
 
-app.use('/api/generate', generateRouter);
 app.use('/api/templates', templatesRouter);
 app.use('/api/news', newsRouter);
 
@@ -23,7 +19,6 @@ app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Gerador de artes disponヴvel',
-    outputDir: path.resolve(config.outputDir),
   });
 });
 
