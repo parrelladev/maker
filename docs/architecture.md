@@ -456,19 +456,19 @@ sobrescreve inputs que já estejam preenchidos.
 
 As variáveis a seguir vivem no escopo global de `public/script.js`:
 
-| Variável | Responsabilidade |
-| --- | --- |
-| `storyTemplates` | catálogo estático exibido na interface |
-| `templateLookup` | índice do catálogo por ID |
-| `storyGroups` | grupos derivados do catálogo |
-| `currentTemplate` | ID do template aberto |
-| `currentTemplateMeta` | metadados estáticos do card aberto |
-| `currentTheme` | tema selecionado |
-| `activeStoryGroup` | grupo de cards visível |
-| `lastNewsData` | último resultado de extração |
-| `lastNewsUrl` | URL à qual o resultado está associado |
-| `currentManifestData` | última resposta de página carregada |
-| `previewInitializedTemplate` | template atualmente escrito no iframe |
+| Variável | Valor inicial | Escritores | Leitores e responsabilidade |
+| --- | --- | --- | --- |
+| `storyTemplates` | catálogo literal | não é reatribuído | catálogo estático exibido na interface |
+| `templateLookup` | índice por ID | não é reatribuído | resolve os metadados recebidos por `openModal` |
+| `storyGroups` | grupos únicos do catálogo | não é reatribuído | define abas e o primeiro grupo ativo |
+| `currentTemplate` | `null` | `openModal`, `closeModalHandler` | ID do template aberto; bloqueia busca, preview e geração sem seleção |
+| `currentTemplateMeta` | `null` | `openModal`, `closeModalHandler` | metadados estáticos do card aberto, usados no título e nos temas |
+| `currentTheme` | `null` | `openModal`, `closeModalHandler`, evento `change` de `customTheme` | tema selecionado, título do modal e payload do preview |
+| `activeStoryGroup` | primeiro item de `storyGroups`, ou `null` | clique em uma aba de categoria | grupo de cards visível; não é alterado ao abrir ou fechar o modal |
+| `lastNewsUrl` | `null` | `openModal`, `closeModalHandler`, `getOrExtractNewsData` | URL exata à qual o último resultado está associado |
+| `lastNewsData` | `null` | `openModal`, `closeModalHandler`, `getOrExtractNewsData` | último resultado de extração, reutilizado somente quando a URL coincide |
+| `currentManifestData` | `null` | `openModal`, `closeModalHandler`, `ensurePreviewInitialized`, geração | resposta completa da página carregada, incluindo manifest, HTML, CSS e logo |
+| `previewInitializedTemplate` | `null` | `openModal`, `closeModalHandler`, `ensurePreviewInitialized` | ID usado para decidir se o documento atual do iframe pode ser reaproveitado |
 
 O arquivo também conserva referências globais aos elementos do DOM. Em
 `api.js`, `manifestCache` é estado persistente privado da IIFE, indexado por
@@ -477,8 +477,41 @@ backend, `LOGO_CACHE` persiste no processo e é indexado pelo valor da logo
 declarado em manifest local. O cache não inclui o texto alternativo recebido na
 chamada nem resultados nulos ou falhas de resolução.
 
-Abrir ou fechar o modal limpa os estados da notícia e do preview. Trocar tema
-preserva o template e os dados e solicita uma atualização do preview.
+### Transições observadas
+
+- Abrir o modal resolve o template e seus metadados, aplica o tema padrão,
+  limpa o par `lastNewsUrl`/`lastNewsData`, limpa o par
+  `currentManifestData`/`previewInitializedTemplate`, esvazia os cinco campos
+  editáveis e reinicializa o documento do iframe.
+- Fechar o modal limpa seleção, tema, notícia e preview, mas preserva
+  `activeStoryGroup`. Os valores dos campos e o documento do iframe não são
+  limpos no fechamento; a próxima abertura executa essa limpeza.
+- Abrir outro template, mesmo sem fechar antes, inicia uma nova sessão com as
+  mesmas invalidações da abertura normal.
+- Trocar tema preserva template, metadados, grupo, notícia e preview
+  inicializado. A troca atualiza o título e solicita uma atualização do mesmo
+  preview.
+- `getOrExtractNewsData` reaproveita `lastNewsData` somente quando
+  `lastNewsUrl === url` e os dados são truthy. Qualquer URL diferente faz nova
+  extração e substitui os dois valores. Não há TTL.
+- `getOrExtractNewsData` não possui identificador de requisição, cancelamento,
+  comparação com a URL ativa antes de atualizar o cache nem controle de
+  obsolescência de respostas. Assim, se uma extração para a URL A for iniciada
+  e outra para a URL B começar depois, B pode terminar primeiro e atualizar o
+  cache. Se A terminar em seguida, sua resposta substitui novamente
+  `lastNewsUrl` e `lastNewsData`. Portanto, a última resposta concluída vence,
+  mesmo quando pertence a uma interação anterior. Esse é um risco conhecido e
+  descreve o comportamento atual, não o comportamento desejado. A correção
+  ficará para uma tarefa incremental separada.
+- `ensurePreviewInitialized` reaproveita `currentManifestData` somente quando
+  ele é truthy e `previewInitializedTemplate === currentTemplate`. Caso
+  contrário, carrega a página e atualiza primeiro os dois valores, depois
+  escreve o documento no iframe.
+
+Essas regras descrevem o contrato atual, não uma proposta de organização. Os
+testes de caracterização em `public/script.test.js` acessam o mesmo escopo do
+script em um contexto isolado e fixam essas transições sem expor uma nova API
+de produção.
 
 ## Dependências entre frontend e backend
 
