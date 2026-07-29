@@ -2,6 +2,9 @@ const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
 
+jest.mock('axios');
+jest.mock('./services/newsScraper');
+
 function loadApp() {
   jest.resetModules();
   return require('./server');
@@ -115,6 +118,10 @@ function waitForStartup(child, expectedMessage) {
 }
 
 describe('aplicação Express', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('importar a aplicação não abre a porta configurada', () => {
     jest.resetModules();
     const express = require('express');
@@ -158,6 +165,131 @@ describe('aplicação Express', () => {
       await expect(newsResponse.json()).resolves.toEqual({
         error: 'URL é obrigatória',
       });
+    });
+  });
+
+  test('lista os templates atuais com os dados do manifest', async () => {
+    const app = loadApp();
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/templates`);
+      const templates = await response.json();
+      const layoutBbc = templates.find((entry) => entry.template === 'layout-bbc');
+
+      expect(response.status).toBe(200);
+      expect(layoutBbc).toEqual({
+        template: 'layout-bbc',
+        pages: [
+          {
+            name: 'index',
+            logoField: 'logo',
+            defaultLogo: 'logo-a-gazeta.svg',
+            dimensions: { width: 1080, height: 1920 },
+          },
+        ],
+      });
+      expect(require('axios').get).not.toHaveBeenCalled();
+    });
+  });
+
+  test('carrega HTML, CSS, manifest e logo de uma página válida', async () => {
+    const app = loadApp();
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/templates/layout-bbc/index`);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.template).toBe('layout-bbc');
+      expect(body.page).toBe('index');
+      expect(body.manifest).toMatchObject({
+        name: 'Layout BBC - index',
+        dimensions: { width: 1080, height: 1920 },
+      });
+      expect(body.html).toContain('<title>Layout BBC</title>');
+      expect(body.css.map((file) => file.name)).toEqual([path.join('css', 'base.css')]);
+      expect(body.resolvedLogo).toMatchObject({ kind: 'inline-svg' });
+      expect(body.resolvedLogo.markup).toContain('<svg');
+      expect(require('axios').get).not.toHaveBeenCalled();
+    });
+  });
+
+  test.each([
+    ['/api/templates/template-inexistente/index', 'Template não encontrado'],
+    ['/api/templates/layout-bbc/pagina-inexistente', 'Página do template não encontrada'],
+  ])('responde 404 para recurso de template ausente em %s', async (route, detail) => {
+    const app = loadApp();
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}${route}`);
+      const body = await response.json();
+
+      expect(response.status).toBe(404);
+      expect(body.error).toBe('Template nǜo encontrado');
+      expect(body.detail).toContain(detail);
+      expect(require('axios').get).not.toHaveBeenCalled();
+    });
+  });
+
+  test('exige URL em POST /api/news/extract sem chamar o scraper', async () => {
+    const app = loadApp();
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/news/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: 'URL é obrigatória' });
+      expect(require('./services/newsScraper').fetch).not.toHaveBeenCalled();
+      expect(require('axios').get).not.toHaveBeenCalled();
+    });
+  });
+
+  test.each([{}, { url: 'ftp://example.com/image.png' }])(
+    'rejeita URL de imagem inválida em POST /api/news/embed-image',
+    async (requestBody) => {
+      const app = loadApp();
+
+      await withHttpServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/news/embed-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: 'URL de imagem inválida',
+        });
+        expect(require('axios').get).not.toHaveBeenCalled();
+      });
+    }
+  );
+
+  test('converte erro do parser JSON pelo middleware global', async () => {
+    const app = loadApp();
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/news/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({
+        error: 'Erro interno do servidor',
+        detail: expect.any(String),
+      });
+      expect(body.detail).not.toBe('');
+      expect(consoleError).toHaveBeenCalled();
+      expect(require('./services/newsScraper').fetch).not.toHaveBeenCalled();
+      expect(require('axios').get).not.toHaveBeenCalled();
     });
   });
 

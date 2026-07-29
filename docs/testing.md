@@ -116,9 +116,19 @@ A suíte de `server.test.js` verifica:
 
 1. importar a aplicação sem chamar `app.listen`;
 2. usar o app em um servidor HTTP local com porta efêmera;
-3. servir a interface em `GET /`;
-4. manter registradas a listagem de templates e a rota de extração de notícias;
-5. iniciar o servidor ao executar `src/server.js` como entrypoint.
+3. `GET /` retornando a interface HTML;
+4. `GET /api/templates` retornando a listagem e os dados do manifest;
+5. `GET /api/templates/:template/:page` carregando um template válido, com
+   manifest, HTML, CSS e logo SVG local;
+6. respostas 404 para template inexistente e página inexistente;
+7. URL obrigatória em `POST /api/news/extract`;
+8. URL ausente e protocolo inválido em `POST /api/news/embed-image`;
+9. JSON malformado convertido em resposta 500 pelo middleware global;
+10. iniciar o servidor ao executar `src/server.js` como entrypoint.
+
+`axios` e `newsScraper` são mockados em `server.test.js`. Os testes HTTP
+adicionados exercitam somente o servidor local e o filesystem do repositório,
+sem realizar chamadas externas reais.
 
 A suíte importa `extractChapeu` de `src/services/newsScraper.js`, cria fragmentos
 HTML em memória com Cheerio e verifica três comportamentos:
@@ -135,7 +145,9 @@ HTML em memória com Cheerio e verifica três comportamentos:
 
 | Módulo | Símbolo | Comportamento demonstrado |
 | --- | --- | --- |
-| `src/server.js` | `app` e guard do entrypoint | importação sem listener, uso HTTP, rotas básicas e inicialização direta |
+| `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erro de JSON e inicialização direta |
+| `src/routes/templates.js` | rotas de listagem e carregamento | listagem, template válido, template inexistente e página inexistente |
+| `src/routes/news.js` | validações de `/extract` e `/embed-image` | URL obrigatória, URL de imagem ausente e protocolo inválido |
 | `src/services/newsScraper.js` | `extractChapeu` | layout atual, layout legado e ausência de correspondência |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
@@ -161,21 +173,19 @@ de cobertura.
 ### Backend
 
 - resolução de `PORT` e `config.js`;
-- parser JSON e limite de 2 MB;
+- limite de 2 MB do parser JSON;
 - ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
-- contratos, status e mensagens não exercitados das rotas;
-- `GET /api/templates/:template/:page`;
-- `POST /api/news/embed-image`;
-- listagem e carregamento de manifests;
+- sucesso e falhas remotas de `POST /api/news/extract`;
+- sucesso e resposta 422 de `POST /api/news/embed-image`;
 - manifests inexistentes ou com JSON inválido;
 - presença de `index.html`;
 - ordem dos arquivos CSS;
 - resolução e cache de logos;
-- SVG local e remoto;
+- SVG remoto;
 - incorporação de imagem como data URL;
-- validação de tipo de conteúdo;
-- timeouts, limites e redirects;
-- caminhos negativos e middleware global de erro.
+- validação de tipo de conteúdo MIME;
+- timeouts, limites de resposta e redirects;
+- proteção contra SSRF.
 
 ### Frontend
 
@@ -219,8 +229,8 @@ de cobertura.
 - Não há `jsdom`, browser real ou ferramenta end-to-end configurada.
 - Não há `supertest`; o harness atual usa `http.createServer`, `fetch` e um
   processo filho para exercitar o Express e o entrypoint.
-- Axios, filesystem e dependências do browser não possuem mocks ou pontos de
-  injeção configurados.
+- `axios` e `newsScraper` são mockados em `server.test.js`; o filesystem e as
+  dependências do browser não possuem mocks ou pontos de injeção configurados.
 - O frontend depende de globais do DOM, iframe, CORS, fontes, imagens e
   `html-to-image`.
 - A suíte não mede cobertura; portanto, “arquivo carregado” não pode ser
@@ -242,13 +252,12 @@ Resultado observado:
 
 ```text
 Test Suites: 2 passed, 2 total
-Tests:       7 passed, 7 total
+Tests:       15 passed, 15 total
 Snapshots:   0 total
 ```
 
-Todos os testes existentes passaram. Esse resultado confirma os quatro cenários
-da aplicação Express e os três cenários de `extractChapeu` descritos neste
-documento.
+Todos os testes existentes passaram. Esse resultado confirma os 12 cenários da
+aplicação Express e os três cenários de `extractChapeu` descritos neste documento.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.
 Os testes HTTP usam portas efêmeras e encerram seus servidores e processos.
