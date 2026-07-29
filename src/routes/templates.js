@@ -35,18 +35,22 @@ function getTemplateErrorResponse(error) {
   };
 }
 
-router.get('/', (req, res) => {
-  const templates = listTemplates().map((entry) => ({
-    template: entry.template,
-    pages: entry.pages.map((page) => ({
-      name: page.name,
-      logoField: page.manifest?.logoField,
-      defaultLogo: page.manifest?.defaultLogo,
-      dimensions: page.manifest?.dimensions,
-    })),
-  }));
+router.get('/', async (req, res, next) => {
+  try {
+    const templates = (await listTemplates()).map((entry) => ({
+      template: entry.template,
+      pages: entry.pages.map((page) => ({
+        name: page.name,
+        logoField: page.manifest?.logoField,
+        defaultLogo: page.manifest?.defaultLogo,
+        dimensions: page.manifest?.dimensions,
+      })),
+    }));
 
-  res.json(templates);
+    res.json(templates);
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/:template/:page', async (req, res) => {

@@ -214,7 +214,7 @@ GET /api/templates/:template/:page
 ```
 
 Os arquivos CSS do diretório compartilhado são retornados antes dos CSS da
-página. Dentro de cada diretório, a ordem é a fornecida por `fs.readdirSync`,
+página. Dentro de cada diretório, a ordem é a fornecida por `fs.promises.readdir`,
 sem ordenação explícita. O frontend concatena o conteúdo recebido na mesma
 ordem.
 

@@ -1,4 +1,4 @@
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const safeHttpClient = require('./safeHttpClient');
 const { SVG_MAX_BYTES, SVG_REQUEST_POLICY } = require('./remoteRequestPolicy');
@@ -48,13 +48,17 @@ async function resolveLogoAsset(value, altText) {
 
   for (const candidate of candidateNames) {
     const candidatePath = path.isAbsolute(candidate) ? candidate : path.join(INPUT_DIR, candidate);
-    if (!fs.existsSync(candidatePath)) continue;
+    try {
+      await fs.access(candidatePath);
+    } catch (_) {
+      continue;
+    }
 
     if (candidate.toLowerCase().endsWith('.svg')) {
-      if (fs.statSync(candidatePath).size > SVG_MAX_BYTES) {
+      if ((await fs.stat(candidatePath)).size > SVG_MAX_BYTES) {
         throw new SvgValidationError('SVG_TOO_LARGE');
       }
-      const markup = sanitizeSvg(fs.readFileSync(candidatePath, 'utf-8'), {
+      const markup = sanitizeSvg(await fs.readFile(candidatePath, 'utf-8'), {
         maxBytes: SVG_MAX_BYTES,
       });
       const result = {

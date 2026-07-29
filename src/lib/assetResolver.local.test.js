@@ -1,20 +1,26 @@
-const fs = require('fs');
+const fs = require('fs').promises;
 const { SVG_MAX_BYTES } = require('./remoteRequestPolicy');
 const { resolveLogoAsset } = require('./assetResolver');
 
-jest.mock('fs');
+jest.mock('fs', () => ({
+  promises: {
+    access: jest.fn(),
+    stat: jest.fn(),
+    readFile: jest.fn(),
+  },
+}));
 
 describe('resolveLogoAsset com SVG local', () => {
   beforeEach(() => {
-    fs.existsSync.mockReset();
-    fs.statSync.mockReset();
-    fs.readFileSync.mockReset();
-    fs.existsSync.mockReturnValue(true);
+    fs.access.mockReset();
+    fs.stat.mockReset();
+    fs.readFile.mockReset();
+    fs.access.mockResolvedValue();
   });
 
   test('sanitiza conteúdo ativo antes de retornar markup inline', async () => {
-    fs.statSync.mockReturnValue({ size: 200 });
-    fs.readFileSync.mockReturnValue(`
+    fs.stat.mockResolvedValue({ size: 200 });
+    fs.readFile.mockResolvedValue(`
       <svg xmlns="http://www.w3.org/2000/svg" onload="steal()">
         <script>alert(1)</script>
         <foreignObject><iframe src="https://evil.test"/></foreignObject>
@@ -34,12 +40,12 @@ describe('resolveLogoAsset com SVG local', () => {
   });
 
   test('rejeita arquivo acima do limite antes de ler seu conteúdo', async () => {
-    fs.statSync.mockReturnValue({ size: SVG_MAX_BYTES + 1 });
+    fs.stat.mockResolvedValue({ size: SVG_MAX_BYTES + 1 });
 
     await expect(resolveLogoAsset('local-too-large.svg')).rejects.toMatchObject({
       code: 'SVG_TOO_LARGE',
       message: 'Conteúdo SVG excede o limite permitido',
     });
-    expect(fs.readFileSync).not.toHaveBeenCalled();
+    expect(fs.readFile).not.toHaveBeenCalled();
   });
 });

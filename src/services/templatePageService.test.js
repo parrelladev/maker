@@ -12,17 +12,22 @@ function createDependencies({
   const pageDir = path.join(templateDir, 'index');
   const htmlPath = path.join(pageDir, 'index.html');
   const fileSystem = {
-    existsSync: jest.fn((target) => Object.hasOwn(directories, target)),
-    statSync: jest.fn(() => ({ isDirectory: () => true })),
-    readdirSync: jest.fn((target) => directories[target] || []),
-    readFileSync: jest.fn((target) => files[target]),
+    access: jest.fn(() => Promise.resolve()),
+    stat: jest.fn((target) => {
+      if (Object.hasOwn(directories, target)) {
+        return Promise.resolve({ isDirectory: () => true });
+      }
+      return Promise.reject(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+    }),
+    readdir: jest.fn((target) => Promise.resolve(directories[target] || [])),
+    readFile: jest.fn((target) => Promise.resolve(files[target])),
   };
-  const loadManifestFn = jest.fn(() => ({
+  const loadManifestFn = jest.fn().mockResolvedValue({
     manifest,
     templateDir,
     pageDir,
     htmlPath,
-  }));
+  });
   const resolveLogoAssetFn = logoError
     ? jest.fn().mockRejectedValue(logoError)
     : jest.fn().mockResolvedValue(logoAsset);
@@ -51,20 +56,18 @@ describe('templatePageService', () => {
     const secondSharedCssPath = path.join(sharedCssDir, 'second.css');
     const firstSharedCssPath = path.join(sharedCssDir, 'first.css');
     const pageCssPath = path.join(deps.pageDir, 'page.css');
-    deps.fileSystem.existsSync.mockImplementation(
-      (target) => target === sharedCssDir || target === deps.pageDir
-    );
-    deps.fileSystem.readdirSync.mockImplementation((target) =>
-      target === sharedCssDir
+    deps.fileSystem.stat.mockResolvedValue({ isDirectory: () => true });
+    deps.fileSystem.readdir.mockImplementation((target) =>
+      Promise.resolve(target === sharedCssDir
         ? ['ignored.txt', 'second.css', 'first.css']
-        : ['page.css', 'index.html']
+        : ['page.css', 'index.html'])
     );
-    deps.fileSystem.readFileSync.mockImplementation((target) => ({
+    deps.fileSystem.readFile.mockImplementation((target) => Promise.resolve(({
       [deps.htmlPath]: '<main>fixture</main>',
       [secondSharedCssPath]: '.second {}',
       [firstSharedCssPath]: '.first {}',
       [pageCssPath]: '.page {}',
-    })[target]);
+    })[target]));
     deps.resolveLogoAssetFn.mockResolvedValue({
       kind: 'inline-svg',
       markup: '<svg></svg>',
@@ -131,6 +134,69 @@ describe('templatePageService', () => {
     expect(deps.resolveLogoAssetFn).not.toHaveBeenCalled();
   });
 
+  test('trata falha inicial de acesso ao diretório CSS como CSS ausente', async () => {
+    const manifest = { name: 'Fixture' };
+    const html = '<main>fixture</main>';
+    const deps = createDependencies({
+      manifest,
+      files: { [path.join('templates', 'fixture', 'index', 'index.html')]: html },
+    });
+    const accessError = Object.assign(new Error('permission denied'), {
+      code: 'EACCES',
+    });
+    deps.fileSystem.access.mockRejectedValue(accessError);
+    const { loadTemplatePage } = createTemplatePageService(deps);
+
+    await expect(loadTemplatePage('fixture', 'index')).resolves.toEqual({
+      template: 'fixture',
+      page: 'index',
+      manifest,
+      html,
+      css: [],
+      resolvedLogo: null,
+    });
+    expect(deps.fileSystem.access).toHaveBeenCalledTimes(2);
+    expect(deps.fileSystem.stat).not.toHaveBeenCalled();
+    expect(deps.fileSystem.readdir).not.toHaveBeenCalled();
+  });
+
+  test('propaga falha de readdir após a verificação inicial do diretório CSS', async () => {
+    const deps = createDependencies({
+      files: { [path.join('templates', 'fixture', 'index', 'index.html')]: '<main />' },
+    });
+    const readdirError = Object.assign(new Error('directory unavailable'), {
+      code: 'EACCES',
+    });
+    deps.fileSystem.stat.mockResolvedValue({ isDirectory: () => true });
+    deps.fileSystem.readdir.mockRejectedValue(readdirError);
+    const { loadTemplatePage } = createTemplatePageService(deps);
+
+    await expect(loadTemplatePage('fixture', 'index')).rejects.toBe(readdirError);
+  });
+
+  test('propaga falha de readFile durante a leitura de um CSS listado', async () => {
+    const deps = createDependencies();
+    const sharedCssDir = path.join(deps.templateDir, 'css');
+    const cssPath = path.join(sharedCssDir, 'shared.css');
+    const readError = Object.assign(new Error('stylesheet disappeared'), {
+      code: 'ENOENT',
+    });
+    deps.fileSystem.stat.mockResolvedValue({ isDirectory: () => true });
+    deps.fileSystem.readdir.mockResolvedValue(['shared.css']);
+    deps.fileSystem.readFile.mockImplementation((target) => {
+      if (target === deps.htmlPath) {
+        return Promise.resolve('<main />');
+      }
+      if (target === cssPath) {
+        return Promise.reject(readError);
+      }
+      return Promise.resolve('');
+    });
+    const { loadTemplatePage } = createTemplatePageService(deps);
+
+    await expect(loadTemplatePage('fixture', 'index')).rejects.toBe(readError);
+  });
+
   test('mantém resposta sem logo e registra falha de resolução', async () => {
     const logoError = new Error('logo indisponível');
     logoError.code = 'LOGO_ERROR';
@@ -158,12 +224,10 @@ describe('templatePageService', () => {
   test('propaga erros de carregamento do manifest para a camada HTTP', async () => {
     const deps = createDependencies();
     const manifestError = new SyntaxError('manifest inválido');
-    deps.loadManifestFn.mockImplementation(() => {
-      throw manifestError;
-    });
+    deps.loadManifestFn.mockRejectedValue(manifestError);
     const { loadTemplatePage } = createTemplatePageService(deps);
 
     await expect(loadTemplatePage('fixture', 'index')).rejects.toBe(manifestError);
-    expect(deps.fileSystem.readFileSync).not.toHaveBeenCalled();
+    expect(deps.fileSystem.readFile).not.toHaveBeenCalled();
   });
 });

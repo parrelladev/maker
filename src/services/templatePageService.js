@@ -1,4 +1,4 @@
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const { loadManifest } = require('../lib/manifestLoader');
 const { resolveLogoAsset } = require('../lib/assetResolver');
@@ -10,18 +10,28 @@ function createTemplatePageService({
   resolveLogoAssetFn = resolveLogoAsset,
   logger = console,
 } = {}) {
-  function readCssFrom(dir) {
-    if (!fileSystem.existsSync(dir) || !fileSystem.statSync(dir).isDirectory()) {
+  async function readCssFrom(dir) {
+    let directoryInfo;
+    try {
+      await fileSystem.access(dir);
+      directoryInfo = await fileSystem.stat(dir);
+    } catch (_) {
       return [];
     }
 
-    return fileSystem
-      .readdirSync(dir)
-      .filter((file) => file.endsWith('.css'))
-      .map((file) => ({
+    if (!directoryInfo.isDirectory()) {
+      return [];
+    }
+
+    const files = await fileSystem.readdir(dir);
+    const css = [];
+    for (const file of files.filter((entry) => entry.endsWith('.css'))) {
+      css.push({
         name: pathModule.join(pathModule.basename(dir), file),
-        content: fileSystem.readFileSync(pathModule.join(dir, file), 'utf-8'),
-      }));
+        content: await fileSystem.readFile(pathModule.join(dir, file), 'utf-8'),
+      });
+    }
+    return css;
   }
 
   async function resolveManifestLogo(template, page, manifest) {
@@ -59,12 +69,11 @@ function createTemplatePageService({
   }
 
   async function loadTemplatePage(template, page) {
-    const manifestInfo = loadManifestFn(template, page);
-    const html = fileSystem.readFileSync(manifestInfo.htmlPath, 'utf-8');
-    const css = [
-      ...readCssFrom(pathModule.join(manifestInfo.templateDir, 'css')),
-      ...readCssFrom(manifestInfo.pageDir),
-    ];
+    const manifestInfo = await loadManifestFn(template, page);
+    const html = await fileSystem.readFile(manifestInfo.htmlPath, 'utf-8');
+    const sharedCss = await readCssFrom(pathModule.join(manifestInfo.templateDir, 'css'));
+    const pageCss = await readCssFrom(manifestInfo.pageDir);
+    const css = [...sharedCss, ...pageCss];
     const manifest = manifestInfo.manifest || {};
     const resolvedLogo = await resolveManifestLogo(template, page, manifest);
 

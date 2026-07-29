@@ -1,4 +1,4 @@
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 
 const TEMPLATE_ROOT = path.resolve('templates');
@@ -7,36 +7,45 @@ function getManifestPath(template, page) {
   return path.join(TEMPLATE_ROOT, template, page, 'manifest.json');
 }
 
-function readJson(manifestPath) {
-  const raw = fs.readFileSync(manifestPath, 'utf-8');
+async function readJson(manifestPath) {
+  const raw = await fs.readFile(manifestPath, 'utf-8');
   return JSON.parse(raw);
 }
 
-function ensureTemplateExists(templateDir, pageDir) {
-  if (!fs.existsSync(templateDir)) {
+async function exists(target) {
+  try {
+    await fs.access(target);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ensureTemplateExists(templateDir, pageDir) {
+  if (!(await exists(templateDir))) {
     throw new Error(`Template não encontrado: ${templateDir}`);
   }
-  if (!fs.existsSync(pageDir)) {
+  if (!(await exists(pageDir))) {
     throw new Error(`Página do template não encontrada: ${pageDir}`);
   }
 }
 
-function loadManifest(template, page) {
+async function loadManifest(template, page) {
   const manifestPath = getManifestPath(template, page);
   const templateDir = path.join(TEMPLATE_ROOT, template);
   const pageDir = path.dirname(manifestPath);
   const htmlPath = path.join(pageDir, 'index.html');
 
-  ensureTemplateExists(templateDir, pageDir);
+  await ensureTemplateExists(templateDir, pageDir);
 
-  if (!fs.existsSync(manifestPath)) {
+  if (!(await exists(manifestPath))) {
     throw new Error(`Manifesto não encontrado em ${manifestPath}`);
   }
-  if (!fs.existsSync(htmlPath)) {
+  if (!(await exists(htmlPath))) {
     throw new Error(`index.html não encontrado para ${template}/${page}`);
   }
 
-  const manifest = readJson(manifestPath);
+  const manifest = await readJson(manifestPath);
   return {
     manifest,
     manifestPath,
@@ -48,48 +57,50 @@ function loadManifest(template, page) {
   };
 }
 
-function listTemplates() {
-  if (!fs.existsSync(TEMPLATE_ROOT)) {
+async function listTemplates() {
+  if (!(await exists(TEMPLATE_ROOT))) {
     return [];
   }
 
-  return fs
-    .readdirSync(TEMPLATE_ROOT, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .map((templateName) => {
-      const templateDir = path.join(TEMPLATE_ROOT, templateName);
-      const pages =
-        fs
-          .readdirSync(templateDir, { withFileTypes: true })
-          .filter((dirent) => dirent.isDirectory())
-          .map((dirent) => dirent.name)
-          .map((pageName) => {
-            const manifestPath = getManifestPath(templateName, pageName);
-            if (!fs.existsSync(manifestPath)) {
-              return null;
-            }
-            try {
-              const manifest = readJson(manifestPath);
-              return {
-                name: pageName,
-                manifest,
-                manifestPath,
-                htmlPath: path.join(templateDir, pageName, 'index.html'),
-              };
-            } catch (error) {
-              return {
-                name: pageName,
-                manifestError: error.message,
-                manifestPath,
-                htmlPath: path.join(templateDir, pageName, 'index.html'),
-              };
-            }
-          })
-          .filter(Boolean);
+  const templateEntries = await fs.readdir(TEMPLATE_ROOT, { withFileTypes: true });
+  const templates = [];
 
-      return { template: templateName, pages };
-    });
+  for (const templateName of templateEntries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)) {
+    const templateDir = path.join(TEMPLATE_ROOT, templateName);
+    const pageEntries = await fs.readdir(templateDir, { withFileTypes: true });
+    const pages = [];
+
+    for (const pageName of pageEntries
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => dirent.name)) {
+      const manifestPath = getManifestPath(templateName, pageName);
+      if (!(await exists(manifestPath))) {
+        continue;
+      }
+      try {
+        const manifest = await readJson(manifestPath);
+        pages.push({
+          name: pageName,
+          manifest,
+          manifestPath,
+          htmlPath: path.join(templateDir, pageName, 'index.html'),
+        });
+      } catch (error) {
+        pages.push({
+          name: pageName,
+          manifestError: error.message,
+          manifestPath,
+          htmlPath: path.join(templateDir, pageName, 'index.html'),
+        });
+      }
+    }
+
+    templates.push({ template: templateName, pages });
+  }
+
+  return templates;
 }
 
 module.exports = {
