@@ -228,8 +228,9 @@ HTML válido com parâmetros, rejeição de MIME ausente ou inesperado, redirect
 bloqueio de destinos não públicos.
 
 A suíte de `src/services/templatePageService.test.js` injeta filesystem, loader,
-resolvedor de logo e logger. Ela confirma o modelo completo, CSS compartilhado
-antes do CSS específico da página, logos SVG e de imagem local ou remota,
+resolvedor de logo e logger. Ela confirma o modelo completo, ordenação por nome
+dentro de cada diretório, CSS compartilhado antes do CSS específico da página,
+logos SVG e de imagem local ou remota,
 ausência de CSS e logo, fallback com warning e propagação de falha do manifest
 para a rota.
 
@@ -274,7 +275,6 @@ de cobertura.
 - resolução de `PORT` e `config.js`;
 - ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
 - redirects reais, respostas comprimidas e streams interrompidos;
-- ordem dos arquivos CSS dentro de um mesmo diretório;
 - cache de logos;
 
 ### Frontend
@@ -350,11 +350,11 @@ Resultado observado:
 
 ```text
 Test Suites: 11 passed, 11 total
-Tests:       212 passed, 212 total
+Tests:       226 passed, 226 total
 Snapshots:   0 total
 ```
 
-Todos os 212 testes existentes passaram. Uma requisição controlada usa a pilha
+Todos os 226 testes existentes passaram. Uma requisição controlada usa a pilha
 Axios/lookup/socket local; nenhuma chamada à internet é realizada.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.

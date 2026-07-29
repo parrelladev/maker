@@ -45,7 +45,7 @@ function createDependencies({
 }
 
 describe('templatePageService', () => {
-  test('monta o modelo preservando HTML, manifest e ordem dos grupos de CSS', async () => {
+  test('monta o modelo preservando HTML, manifest e CSS compartilhado antes do CSS da página', async () => {
     const manifest = {
       defaultLogo: 'fixture.svg',
       logoAlt: 'Logo fixture',
@@ -55,18 +55,20 @@ describe('templatePageService', () => {
     const sharedCssDir = path.join(deps.templateDir, 'css');
     const secondSharedCssPath = path.join(sharedCssDir, 'second.css');
     const firstSharedCssPath = path.join(sharedCssDir, 'first.css');
-    const pageCssPath = path.join(deps.pageDir, 'page.css');
+    const secondPageCssPath = path.join(deps.pageDir, 'second-page.css');
+    const firstPageCssPath = path.join(deps.pageDir, 'first-page.css');
     deps.fileSystem.stat.mockResolvedValue({ isDirectory: () => true });
     deps.fileSystem.readdir.mockImplementation((target) =>
       Promise.resolve(target === sharedCssDir
         ? ['ignored.txt', 'second.css', 'first.css']
-        : ['page.css', 'index.html'])
+        : ['second-page.css', 'index.html', 'first-page.css'])
     );
     deps.fileSystem.readFile.mockImplementation((target) => Promise.resolve(({
       [deps.htmlPath]: '<main>fixture</main>',
       [secondSharedCssPath]: '.second {}',
       [firstSharedCssPath]: '.first {}',
-      [pageCssPath]: '.page {}',
+      [secondPageCssPath]: '.second-page {}',
+      [firstPageCssPath]: '.first-page {}',
     })[target]));
     deps.resolveLogoAssetFn.mockResolvedValue({
       kind: 'inline-svg',
@@ -80,9 +82,10 @@ describe('templatePageService', () => {
       manifest,
       html: '<main>fixture</main>',
       css: [
-        { name: path.join('css', 'second.css'), content: '.second {}' },
         { name: path.join('css', 'first.css'), content: '.first {}' },
-        { name: path.join('index', 'page.css'), content: '.page {}' },
+        { name: path.join('css', 'second.css'), content: '.second {}' },
+        { name: path.join('index', 'first-page.css'), content: '.first-page {}' },
+        { name: path.join('index', 'second-page.css'), content: '.second-page {}' },
       ],
       resolvedLogo: {
         kind: 'inline-svg',

@@ -122,7 +122,9 @@ describe('rotas de templates com fixtures mínimas', () => {
       expect(body.manifest.name).toBe('Fixture válida');
       expect(body.html).toContain('Fixture válida');
       expect(body.css.map((file) => ({ ...file, content: file.content.trim() }))).toEqual([
+        { name: path.join('css', 'base.css'), content: '.base { color: black; }' },
         { name: path.join('css', 'shared.css'), content: '.shared { color: navy; }' },
+        { name: path.join('valid', 'layout.css'), content: '.layout { display: block; }' },
         { name: path.join('valid', 'page.css'), content: '.page { color: white; }' },
       ]);
       expect(body.resolvedLogo.kind).toBe('inline-svg');

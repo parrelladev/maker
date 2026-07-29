@@ -221,9 +221,8 @@ GET /api/templates/:template/:page
 ```
 
 Os arquivos CSS do diretório compartilhado são retornados antes dos CSS da
-página. Dentro de cada diretório, a ordem é a fornecida por `fs.promises.readdir`,
-sem ordenação explícita. O frontend concatena o conteúdo recebido na mesma
-ordem.
+página. Dentro de cada diretório, os arquivos CSS são ordenados pelo nome com
+comparação lexical. O frontend concatena o conteúdo recebido na mesma ordem.
 
 Ausência de template, página, manifest ou HTML é convertida em HTTP 404 com
 `TEMPLATE_NOT_FOUND`. Manifest JSON inválido usa `500 TEMPLATE_INVALID`;

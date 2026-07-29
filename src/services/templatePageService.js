@@ -29,7 +29,11 @@ function createTemplatePageService({
 
     const files = await fileSystem.readdir(dir);
     const css = [];
-    for (const file of files.filter((entry) => entry.endsWith('.css'))) {
+    const cssFiles = files
+      .filter((entry) => entry.endsWith('.css'))
+      .sort();
+
+    for (const file of cssFiles) {
       css.push({
         name: pathModule.join(pathModule.basename(dir), file),
         content: await fileSystem.readFile(pathModule.join(dir, file), 'utf-8'),
