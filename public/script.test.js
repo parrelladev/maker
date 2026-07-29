@@ -2,6 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, reject, resolve };
+}
+
 class FakeClassList {
   constructor() {
     this.values = new Set();
@@ -126,7 +137,10 @@ function createHarness() {
   });
   const windowListeners = {};
   const context = {
-    console,
+    console: {
+      ...console,
+      error: jest.fn()
+    },
     document,
     URL,
     setTimeout,
@@ -618,6 +632,29 @@ describe('precedência dos dados usados na arte', () => {
 });
 
 describe('validacoes atuais da geracao', () => {
+  function preparePendingGeneration(harness, {
+    template = 'layout-hz',
+    url = 'https://example.com/a'
+  } = {}) {
+    const extraction = createDeferred();
+    harness.run(`openModal(${JSON.stringify(template)})`);
+    harness.elements.newsUrl.value = url;
+    harness.extractNewsData.mockReturnValue(extraction.promise);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+
+    return {
+      extraction,
+      generation: harness.run('generateArtWithPreviewFlow()')
+    };
+  }
+
+  function expectNoSuccessToast(harness) {
+    const messages = harness.elements.toastContainer.children
+      .map(toast => toast.innerHTML);
+    expect(messages.some(message => message.includes('Arte gerada e download iniciado!')))
+      .toBe(false);
+  }
+
   test.each([
     {
       name: 'template ausente',
@@ -737,6 +774,59 @@ describe('validacoes atuais da geracao', () => {
     );
     expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
     expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('aplica antes da exportacao o mesmo payload completo construido para o preview', async () => {
+    const harness = createHarness();
+    const updatePreview = jest.fn();
+    const embeddedImage = 'data:image/png;base64,TUFOVUFM';
+    const manifestData = {
+      template: 'layout-hz',
+      page: 'index',
+      manifest: {
+        logoField: 'brand',
+        defaultLogo: 'logo-fallback.svg'
+      },
+      resolvedLogo: {
+        kind: 'inline-svg',
+        markup: '<svg><title>Logo resolvida</title></svg>'
+      },
+      css: [],
+      html: ''
+    };
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.loadManifest.mockResolvedValue(manifestData);
+    harness.context.Api.embedImage.mockResolvedValue(embeddedImage);
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.elements.customTitle.value = 'Titulo manual';
+    harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
+    harness.extractNewsData.mockResolvedValue({
+      h1: 'Titulo extraido',
+      h2: 'Subtitulo extraido',
+      chapeu: 'Categoria extraida',
+      bg: 'https://example.com/extraida.jpg'
+    });
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    const expectedPayload = harness.run(
+      `buildPreviewData(${JSON.stringify(manifestData)}, ${JSON.stringify(embeddedImage)})`
+    );
+    expect(updatePreview).toHaveBeenLastCalledWith(expectedPayload);
+    expect(expectedPayload).toMatchObject({
+      h1: 'Titulo manual',
+      h2: 'Subtitulo extraido',
+      tag: 'Categoria extraida',
+      bg: embeddedImage,
+      resolvedBg: embeddedImage,
+      themeName: 'rosa',
+      themeStylesheet: '../css/theme-rosa.css',
+      brand: 'logo-fallback.svg',
+      resolvedLogo: manifestData.resolvedLogo
+    });
+    expect(updatePreview.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(harness.context.PreviewExport.downloadPreview.mock.invocationCallOrder[0]);
   });
 
   test('gera com data URL JPEG extraida e usa a mesma imagem no preview exportado', async () => {
@@ -922,6 +1012,365 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
     expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
     expect(harness.elements.generateBtn.disabled).not.toBe(true);
+  });
+
+  test('descarta a geracao quando a URL muda durante a extracao', async () => {
+    const harness = createHarness();
+    const { extraction, generation } = preparePendingGeneration(harness);
+    await Promise.resolve();
+
+    harness.elements.newsUrl.value = 'https://example.com/b';
+    harness.elements.newsUrl.dispatch('input');
+    extraction.resolve({
+      chapeu: 'Categoria de A',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    await generation;
+
+    expect(harness.state()).toMatchObject({
+      lastNewsUrl: null,
+      lastNewsData: null
+    });
+    expect(harness.elements.customTag.value).toBe('');
+    expect(harness.elements.customImageUrl.value).toBe('');
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('descarta a geracao quando o template muda durante a extracao', async () => {
+    const harness = createHarness();
+    const { extraction, generation } = preparePendingGeneration(harness);
+    await Promise.resolve();
+
+    harness.run(`openModal('rede-gazeta')`);
+    extraction.resolve({
+      chapeu: 'Categoria antiga',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    await generation;
+
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'rede-gazeta',
+      lastNewsUrl: null,
+      lastNewsData: null
+    });
+    expect(harness.elements.customTag.value).toBe('');
+    expect(harness.elements.customImageUrl.value).toBe('');
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('descarta a geracao de uma sessao fechada e reaberta', async () => {
+    const harness = createHarness();
+    const { extraction, generation } = preparePendingGeneration(harness);
+    await Promise.resolve();
+
+    harness.run(`closeModalHandler(); openModal('agazeta-foto-acima')`);
+    extraction.resolve({
+      chapeu: 'Categoria da sessao anterior',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    await generation;
+
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'agazeta-foto-acima',
+      lastNewsUrl: null,
+      lastNewsData: null
+    });
+    expect(harness.elements.customTag.value).toBe('');
+    expect(harness.elements.customImageUrl.value).toBe('');
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('ignora rejeicao da extracao depois de fechar e reabrir o modal', async () => {
+    const harness = createHarness();
+    const extraction = createDeferred();
+    const extractionStarted = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/a';
+    harness.extractNewsData.mockImplementation(() => {
+      extractionStarted.resolve();
+      return extraction.promise;
+    });
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    await extractionStarted.promise;
+    harness.run(`closeModalHandler(); openModal('agazeta-foto-acima')`);
+    extraction.reject(new Error('falha da sessao anterior'));
+    await generation;
+
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.elements.customTitle.value).toBe('');
+    expect(harness.elements.customTag.value).toBe('');
+    expect(harness.elements.customImageUrl.value).toBe('');
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'agazeta-foto-acima',
+      lastNewsUrl: null,
+      lastNewsData: null
+    });
+  });
+
+  test('ignora rejeicao de embedImage da geracao anterior sem remover o loading da atual', async () => {
+    const harness = createHarness();
+    const embedA = createDeferred();
+    const embedStartedA = createDeferred();
+    const extractionB = createDeferred();
+    const extractionStartedB = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockResolvedValueOnce({
+        chapeu: 'Categoria A',
+        bg: 'https://example.com/a.jpg'
+      })
+      .mockImplementationOnce(() => {
+        extractionStartedB.resolve();
+        return extractionB.promise;
+      });
+    harness.context.Api.embedImage.mockImplementation(() => {
+      embedStartedA.resolve();
+      return embedA.promise;
+    });
+
+    harness.elements.newsUrl.value = 'https://example.com/a';
+    const generationA = harness.run('generateArtWithPreviewFlow()');
+    await embedStartedA.promise;
+    harness.elements.newsUrl.value = 'https://example.com/b';
+    harness.elements.newsUrl.dispatch('input');
+    const generationB = harness.run('generateArtWithPreviewFlow()');
+    await extractionStartedB.promise;
+
+    embedA.reject(new Error('falha da geracao A'));
+    await generationA;
+
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(true);
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+
+    extractionB.resolve({
+      chapeu: 'Categoria B',
+      bg: 'data:image/png;base64,Qg=='
+    });
+    await generationB;
+
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.elements.toastContainer.children[0].innerHTML)
+      .toContain('Arte gerada e download iniciado!');
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('ignora rejeicao do download depois de trocar a sessao do modal', async () => {
+    const harness = createHarness();
+    const download = createDeferred();
+    const downloadStarted = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/a';
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria A',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    harness.context.PreviewExport.downloadPreview.mockImplementation(() => {
+      downloadStarted.resolve();
+      return download.promise;
+    });
+
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    await downloadStarted.promise;
+    harness.run(`closeModalHandler(); openModal('rede-gazeta')`);
+    download.reject(new Error('falha do download anterior'));
+    await generation;
+
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.elements.customTitle.value).toBe('');
+    expect(harness.elements.customTag.value).toBe('');
+    expect(harness.elements.customImageUrl.value).toBe('');
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'rede-gazeta',
+      lastNewsUrl: null,
+      lastNewsData: null
+    });
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('usa snapshot consistente e deixa edicoes posteriores para a proxima geracao', async () => {
+    const harness = createHarness();
+    const extraction = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/a';
+    harness.elements.customTitle.value = 'Titulo inicial';
+    harness.extractNewsData.mockReturnValue(extraction.promise);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    await Promise.resolve();
+
+    harness.elements.customTitle.value = 'Titulo posterior';
+    harness.elements.customTag.value = 'Categoria posterior';
+    harness.run(`currentTheme = 'preto'`);
+    extraction.resolve({
+      h1: 'Titulo extraido',
+      chapeu: 'Categoria extraida',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    await generation;
+
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        h1: 'Titulo inicial',
+        tag: 'Categoria extraida',
+        themeName: 'rosa'
+      }));
+    expect(harness.elements.customTitle.value).toBe('Titulo posterior');
+    expect(harness.elements.customTag.value).toBe('Categoria posterior');
+  });
+
+  test('somente a geracao mais nova pode atualizar cache, preview e exportacao', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    const extractionStartedA = createDeferred();
+    const extractionStartedB = createDeferred();
+    const updatePreview = jest.fn();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.extractNewsData
+      .mockImplementationOnce(() => {
+        extractionStartedA.resolve();
+        return extractionA.promise;
+      })
+      .mockImplementationOnce(() => {
+        extractionStartedB.resolve();
+        return extractionB.promise;
+      });
+
+    harness.elements.newsUrl.value = 'https://example.com/a';
+    const generationA = harness.run('generateArtWithPreviewFlow()');
+    await extractionStartedA.promise;
+    expect(harness.extractNewsData).toHaveBeenCalledTimes(1);
+    harness.elements.newsUrl.value = 'https://example.com/b';
+    harness.elements.newsUrl.dispatch('input');
+    const generationB = harness.run('generateArtWithPreviewFlow()');
+    await extractionStartedB.promise;
+    expect(harness.extractNewsData).toHaveBeenCalledTimes(2);
+
+    extractionB.resolve({
+      chapeu: 'Categoria B',
+      bg: 'data:image/png;base64,Qg=='
+    });
+    await generationB;
+    extractionA.resolve({
+      chapeu: 'Categoria A',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    await generationA;
+
+    expect(harness.state()).toMatchObject({
+      lastNewsUrl: 'https://example.com/b',
+      lastNewsData: {
+        chapeu: 'Categoria B',
+        bg: 'data:image/png;base64,Qg=='
+      }
+    });
+    expect(harness.elements.customTag.value).toBe('Categoria B');
+    expect(updatePreview).toHaveBeenCalledTimes(1);
+    expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({
+      tag: 'Categoria B',
+      bg: 'data:image/png;base64,Qg=='
+    }));
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test.each([
+    {
+      name: 'loadManifest',
+      prepare: harness => {
+        harness.loadManifest.mockRejectedValue(new Error('manifest indisponivel'));
+      },
+      errorMessage: 'manifest indisponivel'
+    },
+    {
+      name: 'Api.embedImage',
+      prepare: harness => {
+        harness.extractNewsData.mockResolvedValue({
+          chapeu: 'Categoria',
+          bg: 'https://example.com/imagem.jpg'
+        });
+        harness.context.Api.embedImage.mockRejectedValue(new Error('imagem indisponivel'));
+      },
+      errorMessage: 'imagem indisponivel'
+    },
+    {
+      name: 'ensurePreviewInitialized',
+      prepare: harness => {
+        harness.extractNewsData.mockResolvedValue({
+          chapeu: 'Categoria',
+          bg: 'data:image/png;base64,QQ=='
+        });
+        harness.context.rejectPreviewInitialization = jest.fn()
+          .mockRejectedValue(new Error('preview indisponivel'));
+        harness.run('ensurePreviewInitialized = rejectPreviewInitialization');
+      },
+      errorMessage: 'preview indisponivel'
+    },
+    {
+      name: 'PreviewExport.downloadPreview',
+      prepare: harness => {
+        harness.extractNewsData.mockResolvedValue({
+          chapeu: 'Categoria',
+          bg: 'data:image/png;base64,QQ=='
+        });
+        harness.context.PreviewExport.downloadPreview
+          .mockRejectedValue(new Error('exportacao indisponivel'));
+      },
+      errorMessage: 'exportacao indisponivel',
+      expectDownload: true
+    }
+  ])('restaura a interface quando $name rejeita', async ({
+    prepare,
+    errorMessage,
+    expectDownload = false
+  }) => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    prepare(harness);
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain(`Erro ao gerar arte: ${errorMessage}`);
+    if (expectDownload) {
+      expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+    } else {
+      expect(harness.elements.previewFrame.contentWindow.__updatePreview).not.toHaveBeenCalled();
+      expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    }
   });
 });
 

@@ -97,6 +97,8 @@ const {
 
 const templateLookup = Object.fromEntries(storyTemplates.map(template => [template.id, template]));
 const storyGroups = Array.from(new Set(storyTemplates.map(template => template.group)));
+const DEFAULT_PAGE = 'index';
+const STALE_GENERATION_CODE = 'GENERATION_STALE';
 
 let currentTemplate = null;
 let currentTemplateMeta = null;
@@ -108,6 +110,9 @@ let lastNewsData = null;
 let lastNewsUrl = null;
 let currentManifestData = null;
 let previewInitializedTemplate = null;
+let previewInitializedPage = null;
+let modalSessionVersion = 0;
+let latestGenerationId = 0;
 let resolvedImageFieldState = {
   source: null,
   value: null,
@@ -177,6 +182,39 @@ function setExtractedImageFieldValue(value, sourceNewsUrl) {
     value,
     newsUrl: sourceNewsUrl
   };
+}
+
+function createGenerationContext(formData) {
+  return {
+    formData: { ...formData },
+    generationId: ++latestGenerationId,
+    modalSessionVersion,
+    page: DEFAULT_PAGE,
+    template: formData.template,
+    url: formData.newsUrl
+  };
+}
+
+function isGenerationContextCurrent(context) {
+  return (
+    context.generationId === latestGenerationId
+    && context.modalSessionVersion === modalSessionVersion
+    && context.template === currentTemplate
+    && context.page === DEFAULT_PAGE
+    && context.url === normalizeOptionalValue(newsUrl.value)
+  );
+}
+
+function assertGenerationContextCurrent(context) {
+  if (isGenerationContextCurrent(context)) return;
+
+  const error = new Error('Geração obsoleta');
+  error.code = STALE_GENERATION_CODE;
+  throw error;
+}
+
+function isStaleGenerationError(error) {
+  return error && error.code === STALE_GENERATION_CODE;
 }
 
 function resizePreviewFrame() {
@@ -391,12 +429,14 @@ function updateModalTitle() {
 function openModal(templateKey) {
   const templateData = templateLookup[templateKey];
 
+  modalSessionVersion += 1;
   currentTemplateMeta = templateData || null;
   currentTemplate = templateData ? templateData.id : templateKey;
   lastNewsData = null;
   lastNewsUrl = null;
   currentManifestData = null;
   previewInitializedTemplate = null;
+  previewInitializedPage = null;
   clearResolvedImageFieldState();
 
   if (templateData && Array.isArray(templateData.themes) && templateData.themes.length) {
@@ -449,6 +489,7 @@ function openModal(templateKey) {
 }
 
 function closeModalHandler() {
+  modalSessionVersion += 1;
   modal.classList.remove('show');
   currentTemplate = null;
   currentTemplateMeta = null;
@@ -457,6 +498,7 @@ function closeModalHandler() {
   lastNewsUrl = null;
   currentManifestData = null;
   previewInitializedTemplate = null;
+  previewInitializedPage = null;
   clearResolvedImageFieldState();
 
   if (customTheme) {
@@ -471,13 +513,16 @@ async function loadManifest(template, page = 'index') {
     return window.Api.loadManifest(template, page);
   }
   
-  async function getOrExtractNewsData(url) {
+  async function getOrExtractNewsData(url, assertCurrent = null) {
+  if (assertCurrent) assertCurrent();
+
   if (lastNewsUrl === url && lastNewsData) {
     return lastNewsData;
   }
 
   clearResolvedImageFieldState({ clearMatchingField: true });
   const data = (await window.Api.extractNewsData(url)) || {};
+  if (assertCurrent) assertCurrent();
   lastNewsUrl = url;
   lastNewsData = data;
   return data;
@@ -546,18 +591,30 @@ async function handleFetchNewsAndPreview() {
 }
 
 // Monta o HTML/CSS do template dentro do iframe de preview reaproveitando o manifest.
-async function ensurePreviewInitialized() {
-  if (!previewFrame || !currentTemplate) {
+async function ensurePreviewInitialized({
+  template = currentTemplate,
+  page = DEFAULT_PAGE,
+  manifestData: providedManifestData = null,
+  assertCurrent = null
+} = {}) {
+  if (!previewFrame || !template) {
     return null;
   }
 
-  if (previewInitializedTemplate === currentTemplate && currentManifestData) {
+  if (
+    previewInitializedTemplate === template
+    && previewInitializedPage === page
+    && currentManifestData
+  ) {
+    if (assertCurrent) assertCurrent();
     return currentManifestData;
   }
 
-  const manifestData = await loadManifest(currentTemplate, 'index');
+  const manifestData = providedManifestData || await loadManifest(template, page);
+  if (assertCurrent) assertCurrent();
   currentManifestData = manifestData;
-  previewInitializedTemplate = currentTemplate;
+  previewInitializedTemplate = template;
+  previewInitializedPage = page;
 
   const frameDoc = previewFrame.contentDocument || previewFrame.contentWindow.document;
   if (!frameDoc) {
@@ -762,11 +819,15 @@ async function ensurePreviewInitialized() {
   return manifestData;
 }
 
-function buildPreviewData(manifestData, backgroundOverride = null) {
-  const formData = readGenerationFormData();
+function buildPreviewData(
+  manifestData,
+  backgroundOverride = null,
+  formData = readGenerationFormData(),
+  extractedDataOverride = null
+) {
   const url = formData.newsUrl;
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
-  const extractedData = hasMatchingNews ? lastNewsData : {};
+  const extractedData = extractedDataOverride || (hasMatchingNews ? lastNewsData : {});
 
   return createArtworkData({
     formData,
@@ -778,6 +839,15 @@ function buildPreviewData(manifestData, backgroundOverride = null) {
   });
 }
 
+function applyArtworkDataToPreview(artworkData) {
+  const frameWindow = previewFrame && previewFrame.contentWindow;
+  if (!frameWindow || typeof frameWindow.__updatePreview !== 'function') {
+    return;
+  }
+
+  frameWindow.__updatePreview(artworkData);
+}
+
 async function updatePreview(backgroundOverride = null) {
   if (!previewFrame || !currentTemplate) {
     return;
@@ -787,13 +857,8 @@ async function updatePreview(backgroundOverride = null) {
     const manifestData = await ensurePreviewInitialized();
     if (!manifestData) return;
 
-    const frameWindow = previewFrame.contentWindow;
-    if (!frameWindow || typeof frameWindow.__updatePreview !== 'function') {
-      return;
-    }
-
-    const payload = buildPreviewData(manifestData, backgroundOverride);
-    frameWindow.__updatePreview(payload);
+    const artworkData = buildPreviewData(manifestData, backgroundOverride);
+    applyArtworkDataToPreview(artworkData);
   } catch (error) {
     console.error('Erro ao atualizar preview:', error);
   }
@@ -802,47 +867,63 @@ async function updatePreview(backgroundOverride = null) {
 // Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
 async function generateArtWithPreviewFlow() {
   const formData = readGenerationFormData();
-  const url = formData.newsUrl;
-  const imageOverride = formData.manualImage || formData.resolvedImage;
 
   const inputValidation = validateGenerationInput(formData);
   if (!applyGenerationValidation(inputValidation)) {
     return;
   }
 
+  const generationContext = createGenerationContext(formData);
+  const assertCurrent = () => assertGenerationContextCurrent(generationContext);
+
   try {
     showLoading();
 
-    const manifestData = await loadManifest(currentTemplate, 'index');
+    const manifestData = await loadManifest(
+      generationContext.template,
+      generationContext.page
+    );
+    assertCurrent();
     currentManifestData = manifestData;
 
-    const extractedData = await getOrExtractNewsData(url);
-    const extractedChapeu = extractedData.chapeu || null;
+    const extractedData = await getOrExtractNewsData(
+      generationContext.url,
+      assertCurrent
+    );
+    assertCurrent();
 
-    let currentFormData = readGenerationFormData();
-    if (!currentFormData.manualCategory && extractedChapeu) {
-      customTag.value = extractedChapeu;
-      currentFormData = readGenerationFormData();
+    if (
+      !generationContext.formData.manualCategory
+      && extractedData.chapeu
+      && normalizeOptionalValue(customTag.value)
+        === generationContext.formData.manualCategory
+    ) {
+      assertCurrent();
+      customTag.value = extractedData.chapeu;
     }
 
-    const manualTag = currentFormData.manualCategory;
-    const resolvedChapeu = manualTag || extractedChapeu || '';
-    const effectiveBg = imageOverride || extractedData.bg || null;
+    const artworkData = buildPreviewData(
+      manifestData,
+      null,
+      generationContext.formData,
+      extractedData
+    );
 
     const resolvedContentValidation = validateGenerationInput({
-      ...formData,
+      ...generationContext.formData,
       requireResolvedContent: true,
-      resolvedCategory: resolvedChapeu,
-      effectiveImage: effectiveBg
+      resolvedCategory: artworkData.tag,
+      effectiveImage: artworkData.bg
     });
     if (!applyGenerationValidation(resolvedContentValidation)) {
       return;
     }
 
     const pageName = manifestData.page || 'index';
-    const exportBg = /^https?:\/\//i.test(effectiveBg)
-      ? await window.Api.embedImage(effectiveBg)
-      : effectiveBg;
+    const exportBg = /^https?:\/\//i.test(artworkData.bg)
+      ? await window.Api.embedImage(artworkData.bg)
+      : artworkData.bg;
+    assertCurrent();
 
     if (!isValidResolvedImageValue(exportBg)) {
       applyGenerationValidation({
@@ -854,19 +935,41 @@ async function generateArtWithPreviewFlow() {
       return;
     }
 
-    await updatePreview(exportBg);
+    const exportArtworkData = buildPreviewData(
+      manifestData,
+      exportBg,
+      generationContext.formData,
+      extractedData
+    );
+    await ensurePreviewInitialized({
+      template: generationContext.template,
+      page: generationContext.page,
+      manifestData,
+      assertCurrent
+    });
+    assertCurrent();
+    applyArtworkDataToPreview(exportArtworkData);
     await window.PreviewExport.downloadPreview(
       previewFrame,
       manifestData,
-      buildExportFilename(currentTemplate, pageName),
+      buildExportFilename(generationContext.template, pageName),
     );
+    assertCurrent();
 
     showToast('Arte gerada e download iniciado!', 'success');
   } catch (error) {
+    if (
+      isStaleGenerationError(error)
+      || !isGenerationContextCurrent(generationContext)
+    ) {
+      return;
+    }
     console.error('Erro ao gerar arte:', error);
     showToast('Erro ao gerar arte: ' + error.message, 'error');
   } finally {
-    hideLoading();
+    if (generationContext.generationId === latestGenerationId) {
+      hideLoading();
+    }
   }
 }
 

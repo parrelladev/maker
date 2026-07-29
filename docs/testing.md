@@ -247,15 +247,33 @@ do formulário e o estado global de template, tema, notícia, manifest e preview
 incluindo abertura, fechamento e troca de template. O cache de notícias tem
 cobertura parcial: reutilização para a mesma URL, substituição para URL
 diferente e o comportamento atual de uma resposta atrasada são registrados. A
-resposta atrasada ainda pode substituir o cache mais recente; o teste
-caracteriza essa limitação, mas não a corrige.
+chamada direta sem contexto ainda caracteriza que uma resposta atrasada pode
+substituir o cache. No fluxo de geração, testes separados confirmam que
+respostas obsoletas não atualizam o cache.
 
 A mesma suíte cobre os caminhos de validação da geração na orquestração,
 incluindo mensagens, foco e ausência de efeitos assíncronos nas falhas iniciais,
 além da restauração do loading e do botão nas falhas pós-extração cobertas. Uma
 geração válida com conflito entre valores manuais e extraídos confirma a
 precedência da categoria e da imagem manuais, a aplicação da data URL
-incorporada ao preview e o envio desse preview ao exportador simulado.
+incorporada ao preview e o envio desse preview ao exportador simulado. Outro
+teste compara o payload completo aplicado imediatamente antes da captura com o
+resultado de `buildPreviewData`, incluindo textos, categoria, imagem, tema e
+logo, e confirma a ordem entre atualização do DOM e download.
+
+Promises controladas cobrem mudança de URL durante extração, troca de template,
+fechamento e reabertura do modal e duas gerações concorrentes concluídas fora
+de ordem. Os testes confirmam que somente o contexto mais novo pode alterar
+cache, categoria, preview e exportação. Outro caso altera campos durante a
+extração e demonstra que a geração usa o snapshot inicial, deixando as edições
+posteriores para a operação seguinte.
+
+Falhas injetadas em carregamento de manifest, incorporação da imagem,
+inicialização do preview e download confirmam ausência de sucesso, bloqueio das
+etapas posteriores e restauração do loading e do botão. Promises controladas
+também confirmam que rejeições antigas de extração, incorporação e download não
+produzem erro depois de troca de sessão ou início de uma geração mais recente,
+sem remover o loading pertencente à operação atual.
 
 Testes diretos de `buildPreviewData` caracterizam sua integração com formulário
 e cache, enquanto testes unitários de `createArtworkData` exercitam a montagem
@@ -311,7 +329,7 @@ botão são restaurados.
 | `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
-| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, matriz de precedência de textos, categoria, imagem, tema e logo, data URL extraída no preview/exportação e restauração do loading e botão nos caminhos cobertos |
+| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado e imutável na geração, transições do estado global, descarte por URL, template, sessão e geração, concorrência fora de ordem, falhas assíncronas, validações da orquestração, matriz de precedência, payload canônico no preview/exportação e restauração do loading e botão |
 | `public/js/frontend-utils.js` | `createArtworkData`, `validateGenerationInput` e transformações auxiliares | payload completo da arte, precedência e fallbacks sem DOM ou globals; validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
@@ -346,9 +364,6 @@ de cobertura.
 - navegador real;
 - exportação PNG real;
 - equivalência visual completa entre preview e PNG;
-- duas gerações concorrentes;
-- prevenção de respostas obsoletas;
-- mudanças nos campos durante operações assíncronas;
 - catálogo e seleção de templates por interação real;
 - seleção e troca de tema em navegador;
 - cliente das APIs;
@@ -410,7 +425,8 @@ Comando:
 npm.cmd test
 ```
 
-Resultado observado: 13 suítes e 342 testes passaram. Uma
+Resultado observado: consulte a execução mais recente de `npm.cmd test`; a
+documentação não fixa a contagem porque ela muda a cada teste adicionado. Uma
 requisição controlada usa a pilha Axios/lookup/socket local; nenhuma chamada à
 internet é realizada.
 
