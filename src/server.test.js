@@ -168,69 +168,6 @@ describe('aplicação Express', () => {
     });
   });
 
-  test('lista os templates atuais com os dados do manifest', async () => {
-    const app = loadApp();
-
-    await withHttpServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/templates`);
-      const templates = await response.json();
-      const layoutBbc = templates.find((entry) => entry.template === 'layout-bbc');
-
-      expect(response.status).toBe(200);
-      expect(layoutBbc).toEqual({
-        template: 'layout-bbc',
-        pages: [
-          {
-            name: 'index',
-            logoField: 'logo',
-            defaultLogo: 'logo-a-gazeta.svg',
-            dimensions: { width: 1080, height: 1920 },
-          },
-        ],
-      });
-      expect(require('axios').get).not.toHaveBeenCalled();
-    });
-  });
-
-  test('carrega HTML, CSS, manifest e logo de uma página válida', async () => {
-    const app = loadApp();
-
-    await withHttpServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/templates/layout-bbc/index`);
-      const body = await response.json();
-
-      expect(response.status).toBe(200);
-      expect(body.template).toBe('layout-bbc');
-      expect(body.page).toBe('index');
-      expect(body.manifest).toMatchObject({
-        name: 'Layout BBC - index',
-        dimensions: { width: 1080, height: 1920 },
-      });
-      expect(body.html).toContain('<title>Layout BBC</title>');
-      expect(body.css.map((file) => file.name)).toEqual([path.join('css', 'base.css')]);
-      expect(body.resolvedLogo).toMatchObject({ kind: 'inline-svg' });
-      expect(body.resolvedLogo.markup).toContain('<svg');
-      expect(require('axios').get).not.toHaveBeenCalled();
-    });
-  });
-
-  test.each([
-    ['/api/templates/template-inexistente/index', 'Template não encontrado'],
-    ['/api/templates/layout-bbc/pagina-inexistente', 'Página do template não encontrada'],
-  ])('responde 404 para recurso de template ausente em %s', async (route, detail) => {
-    const app = loadApp();
-
-    await withHttpServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}${route}`);
-      const body = await response.json();
-
-      expect(response.status).toBe(404);
-      expect(body.error).toBe('Template nǜo encontrado');
-      expect(body.detail).toContain(detail);
-      expect(require('axios').get).not.toHaveBeenCalled();
-    });
-  });
-
   test('exige URL em POST /api/news/extract sem chamar o scraper', async () => {
     const app = loadApp();
 

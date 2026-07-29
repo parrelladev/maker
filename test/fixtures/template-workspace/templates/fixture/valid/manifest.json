@@ -1,0 +1,6 @@
+{
+  "name": "Fixture válida",
+  "dimensions": { "width": 320, "height": 480 },
+  "logoField": "logo",
+  "defaultLogo": "fixture-logo.svg"
+}

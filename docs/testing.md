@@ -99,16 +99,17 @@ Essa configuração contribui para a repetibilidade da suíte atual, que:
 - não grava no filesystem;
 - inicia e encerra servidores HTTP locais controlados pelos testes;
 - não abre navegador;
-- não usa fixtures externas.
+- usa fixtures mínimas versionadas no próprio repositório.
 
 Não há configuração de limite mínimo de cobertura, snapshots ou setup global.
 
 ## Testes existentes
 
-Existem dois arquivos:
+Existem três arquivos:
 
 ```text
 src/server.test.js
+src/routes/templates.test.js
 src/services/newsScraper.test.js
 ```
 
@@ -117,18 +118,36 @@ A suíte de `server.test.js` verifica:
 1. importar a aplicação sem chamar `app.listen`;
 2. usar o app em um servidor HTTP local com porta efêmera;
 3. `GET /` retornando a interface HTML;
-4. `GET /api/templates` retornando a listagem e os dados do manifest;
-5. `GET /api/templates/:template/:page` carregando um template válido, com
-   manifest, HTML, CSS e logo SVG local;
-6. respostas 404 para template inexistente e página inexistente;
-7. URL obrigatória em `POST /api/news/extract`;
-8. URL ausente e protocolo inválido em `POST /api/news/embed-image`;
-9. JSON malformado convertido em resposta 500 pelo middleware global;
-10. iniciar o servidor ao executar `src/server.js` como entrypoint.
+4. manter registradas `GET /api/templates` e `POST /api/news/extract`;
+5. URL obrigatória em `POST /api/news/extract`;
+6. URL ausente e protocolo inválido em `POST /api/news/embed-image`;
+7. JSON malformado convertido em resposta 500 pelo middleware global;
+8. iniciar o servidor ao executar `src/server.js` como entrypoint.
 
 `axios` e `newsScraper` são mockados em `server.test.js`. Os testes HTTP
 adicionados exercitam somente o servidor local e o filesystem do repositório,
 sem realizar chamadas externas reais.
+
+A suíte de `src/routes/templates.test.js` usa
+`test/fixtures/template-workspace` como diretório de trabalho temporário. Os
+módulos são carregados depois da troca de diretório, de modo que os
+`path.resolve('templates')` e `path.resolve('input')` atuais apontem para as
+fixtures. O diretório original é restaurado após cada teste. Esse workspace
+mínimo contém somente os arquivos necessários para manifest válido, manifest
+ausente, JSON inválido, `index.html` ausente, ausência de CSS, CSS compartilhado,
+CSS da página, logo SVG local e logo ausente.
+
+Essa suíte verifica:
+
+1. carregamento de template válido;
+2. template inexistente;
+3. página inexistente;
+4. manifest ausente;
+5. manifest inválido;
+6. `index.html` ausente;
+7. diretório sem CSS;
+8. CSS compartilhado do template e CSS específico da página;
+9. logo local e logo ausente.
 
 A suíte importa `extractChapeu` de `src/services/newsScraper.js`, cria fragmentos
 HTML em memória com Cheerio e verifica três comportamentos:
@@ -146,7 +165,9 @@ HTML em memória com Cheerio e verifica três comportamentos:
 | Módulo | Símbolo | Comportamento demonstrado |
 | --- | --- | --- |
 | `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erro de JSON e inicialização direta |
-| `src/routes/templates.js` | rotas de listagem e carregamento | listagem, template válido, template inexistente e página inexistente |
+| `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes |
+| `src/lib/manifestLoader.js` | `listTemplates` e `loadManifest` por meio das rotas | descoberta, filtragem, parsing e validação dos arquivos mínimos |
+| `src/lib/assetResolver.js` | `resolveLogoAsset` por meio da rota | SVG local e fallback de logo ausente |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image` | URL obrigatória, URL de imagem ausente e protocolo inválido |
 | `src/services/newsScraper.js` | `extractChapeu` | layout atual, layout legado e ausência de correspondência |
 
@@ -177,10 +198,8 @@ de cobertura.
 - ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
 - sucesso e falhas remotas de `POST /api/news/extract`;
 - sucesso e resposta 422 de `POST /api/news/embed-image`;
-- manifests inexistentes ou com JSON inválido;
-- presença de `index.html`;
-- ordem dos arquivos CSS;
-- resolução e cache de logos;
+- ordem dos arquivos CSS dentro de um mesmo diretório;
+- cache de logos;
 - SVG remoto;
 - incorporação de imagem como data URL;
 - validação de tipo de conteúdo MIME;
@@ -229,6 +248,8 @@ de cobertura.
 - Não há `jsdom`, browser real ou ferramenta end-to-end configurada.
 - Não há `supertest`; o harness atual usa `http.createServer`, `fetch` e um
   processo filho para exercitar o Express e o entrypoint.
+- A suíte de templates troca temporariamente o `cwd` do processo e depende da
+  execução serial configurada por `--runInBand`; cada teste restaura o diretório.
 - `axios` e `newsScraper` são mockados em `server.test.js`; o filesystem e as
   dependências do browser não possuem mocks ou pontos de injeção configurados.
 - O frontend depende de globais do DOM, iframe, CORS, fontes, imagens e
@@ -251,13 +272,14 @@ npm.cmd test
 Resultado observado:
 
 ```text
-Test Suites: 2 passed, 2 total
-Tests:       15 passed, 15 total
+Test Suites: 3 passed, 3 total
+Tests:       20 passed, 20 total
 Snapshots:   0 total
 ```
 
-Todos os testes existentes passaram. Esse resultado confirma os 12 cenários da
-aplicação Express e os três cenários de `extractChapeu` descritos neste documento.
+Todos os testes existentes passaram. Esse resultado confirma os oito cenários
+da aplicação Express, os nove cenários de fixtures de templates e os três
+cenários de `extractChapeu` descritos neste documento.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.
 Os testes HTTP usam portas efêmeras e encerram seus servidores e processos.
