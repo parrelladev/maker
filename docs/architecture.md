@@ -110,7 +110,8 @@ resolvidos.
 - imagem remota não SVG conserva a própria URL;
 - imagem local não SVG é localizada em `input`;
 - nomes sem extensão são procurados nas extensões suportadas;
-- resultados são guardados no `LOGO_CACHE`, indexado pelo valor original.
+- dados estáveis dos resultados são guardados no `LOGO_CACHE`, indexado pelo
+  valor original; o texto alternativo é aplicado separadamente a cada chamada.
 
 `src/lib/safeHttpClient.js` centraliza os downloads feitos pelo servidor. Antes
 da conexão, valida protocolo e credenciais, resolve e fixa o endereço DNS e
@@ -457,7 +458,7 @@ As variáveis a seguir vivem no escopo global de `public/script.js`:
 O arquivo também conserva referências globais aos elementos do DOM. Em
 `api.js`, `manifestCache` é estado persistente privado da IIFE, indexado por
 template e página. No backend, `LOGO_CACHE` persiste no processo e é indexado
-pelo valor da logo.
+pelo valor da logo. O cache não inclui o texto alternativo recebido na chamada.
 
 Abrir ou fechar o modal limpa os estados da notícia e do preview. Trocar tema
 preserva o template e os dados e solicita uma atualização do preview.

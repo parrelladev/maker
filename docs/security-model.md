@@ -325,7 +325,8 @@ a captura.
 6. converte essas propriedades em atributos validados nos elementos;
 7. reconstrói o documento usando allowlists de elementos, atributos e valores,
    sem conservar o elemento `style`;
-8. guarda o resultado sanitizado no `LOGO_CACHE`;
+8. guarda no `LOGO_CACHE` o resultado sanitizado sem dados de apresentação da
+   chamada, como o texto alternativo;
 9. envia o markup na resposta da rota de template;
 10. o binding `logo` atribui o markup a `el.innerHTML` dentro do iframe.
 

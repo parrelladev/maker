@@ -242,7 +242,7 @@ para a rota.
 | `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erros públicos, delegação após `headersSent` e inicialização direta |
 | `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes; arquivo obrigatório ilegível; falha de asset remoto; erro inesperado; e erros públicos sem detalhes internos |
 | `src/lib/manifestLoader.js` | `inspectTemplateCatalog`, `listTemplates` e `loadManifest` | descoberta, diagnósticos internos, filtragem, parsing e validação dos arquivos mínimos |
-| `src/lib/assetResolver.js` | `resolveLogoAsset` | SVG local, fallback de logo ausente e download SVG remoto simulado |
+| `src/lib/assetResolver.js` | `resolveLogoAsset` | SVG local, imagem local e remota, ordem de extensões, cache sem compartilhamento de texto alternativo, fallback de logo ausente e download SVG remoto simulado |
 | `src/lib/imageValidator.js` | `validateImageResponse` | allowlist de MIME, corpo binário, tamanho, vazio e assinaturas básicas |
 | `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
 | `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, contrato Axios e conexão local real |

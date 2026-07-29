@@ -56,6 +56,32 @@ describe('resolveLogoAsset com SVG remoto simulado', () => {
     });
   });
 
+  test('não baixa imagem remota não SVG e preserva seu modelo', async () => {
+    const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
+    const imageUrl = 'https://cdn.example/logo.png';
+
+    await expect(resolveLogoAsset(imageUrl, 'Logo')).resolves.toEqual({
+      kind: 'image',
+      src: imageUrl,
+      source: imageUrl,
+      sourceType: 'remote',
+      alt: 'Logo',
+    });
+    expect(currentClient.get).not.toHaveBeenCalled();
+  });
+
+  test('reutiliza SVG remoto em cache e aplica o alt explícito de cada chamada', async () => {
+    const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
+    currentClient.get.mockResolvedValue(svgResponse());
+
+    const first = await resolveLogoAsset(publicUrl, 'Logo A');
+    const second = await resolveLogoAsset(publicUrl, 'Logo B');
+
+    expect(first).toMatchObject({ kind: 'inline-svg', alt: 'Logo A' });
+    expect(second).toMatchObject({ kind: 'inline-svg', alt: 'Logo B' });
+    expect(currentClient.get).toHaveBeenCalledTimes(1);
+  });
+
   test('propaga timeout do download de SVG', async () => {
     const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
     const error = new SafeHttpError('TIMEOUT');
