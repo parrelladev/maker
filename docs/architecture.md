@@ -41,7 +41,13 @@ template em disco ──> backend ────+──> frontend
 │   │   └── newsScraper.test.js    # testes do chapéu
 │   └── lib/
 │       ├── manifestLoader.js       # descoberta e leitura de manifests
-│       └── assetResolver.js        # resolução de logos locais/remotas
+│       ├── assetResolver.js        # resolução de logos locais/remotas
+│       ├── imageValidator.js       # MIME, tamanho e assinatura de imagens
+│       ├── imageValidator.test.js  # testes da validação binária
+│       ├── remoteRequestPolicy.js  # limites dos downloads remotos
+│       ├── remoteRequestPolicy.test.js # testes dos limites compartilhados
+│       ├── safeHttpClient.js       # cliente compartilhado para URLs remotas
+│       └── safeHttpClient.test.js  # classificação e controles do cliente
 ├── public/
 │   ├── index.html                 # estrutura da interface e do modal
 │   ├── styles.css                 # apresentação da interface
@@ -97,6 +103,28 @@ retorna o manifest junto com os caminhos resolvidos.
 - imagem local não SVG é localizada em `input`;
 - nomes sem extensão são procurados nas extensões suportadas;
 - resultados são guardados no `LOGO_CACHE`, indexado pelo valor original.
+
+`src/lib/safeHttpClient.js` centraliza os downloads feitos pelo servidor. Antes
+da conexão, valida protocolo e credenciais, resolve e fixa o endereço DNS e
+rejeita endereços não públicos IPv4 e IPv6. O mesmo processo ocorre em cada
+redirecionamento, que é seguido explicitamente pelo cliente. O `lookup`
+Promise-based entrega ao Axios somente endereços previamente validados, sem
+alterar hostname, `Host`, TLS ou SNI. Cada consumidor fornece timeout, limite de
+bytes e quantidade máxima de redirecionamentos; os erros operacionais são
+classificados. O timeout cria uma única deadline monotônica para a operação
+completa: DNS, conexão, resposta e redirects compartilham o mesmo orçamento, e
+cada chamada Axios recebe somente o tempo restante.
+
+`src/lib/remoteRequestPolicy.js` centraliza, em três perfis imutáveis, timeout,
+limite de bytes, máximo compartilhado de redirects e os `User-Agent`s usados
+pelos downloads de HTML e imagem. O perfil de SVG preserva a ausência de
+`User-Agent` adicional. Os consumidores acrescentam somente o `responseType`
+adequado ao chamar `safeHttpClient`.
+
+`src/lib/imageValidator.js` valida a resposta binária usada na incorporação de
+imagens. Ele aceita apenas PNG, JPEG, GIF e WebP, normaliza parâmetros do MIME,
+rejeita corpo vazio ou acima do limite e compara uma assinatura básica com o
+tipo declarado. As falhas usam mensagens classificadas e estáveis.
 
 `src/services/newsScraper.js` baixa o HTML da notícia e usa Cheerio para extrair
 título, subtítulo, imagem e chapéu. O texto é normalizado e limitado. A
@@ -182,7 +210,7 @@ getOrExtractNewsData(url)
 POST /api/news/extract
    |
    +--> newsScraper.fetch(url)
-   |      +--> axios.get(HTML)
+   |      +--> safeHttpClient.get(HTML)
    |      +--> cheerio.load
    |      +--> título: og:title -> title -> primeiro h1
    |      +--> subtítulo: og:description -> description -> primeiro h2
@@ -214,9 +242,10 @@ Existem fluxos diferentes para imagem de notícia, imagem manual e logo.
 ### Imagem extraída
 
 Quando o valor encontrado pelo scraper é uma URL HTTP ou HTTPS, `embedImage` em
-`routes/news.js` faz um segundo download com Axios. Ele usa timeout de 15
-segundos, limite declarado de 12 MB, até três redirecionamentos e exige um
-`Content-Type` iniciado por `image/`. O buffer vira
+`routes/news.js` faz um segundo download com o cliente HTTP compartilhado. Ele
+usa timeout de 15 segundos, limite de 12 MB durante o recebimento, até três
+redirecionamentos e exige PNG, JPEG, GIF ou WebP com assinatura básica
+compatível com o `Content-Type`. O buffer vira
 `data:<tipo>;base64,...`. Referências relativas de imagem não passam por esse
 download e são preservadas sem resolução contra a URL da notícia.
 
@@ -443,7 +472,7 @@ No frontend:
 
 - A composição do Express permanece no mesmo módulo do entrypoint, embora o
   guard de `require.main` permita importar o app sem abrir a porta configurada.
-- As rotas acessam diretamente filesystem, Axios e serviços importados, sem
+- As rotas acessam diretamente filesystem e serviços importados, sem
   pontos explícitos de injeção.
 - `templates.js` combina roteamento, leitura de HTML/CSS, ordenação, resolução
   de logo e tradução de erros.
@@ -463,16 +492,19 @@ No frontend:
 - Os caches do frontend e do backend persistem no escopo do módulo/processo e
   não têm API de limpeza.
 - Os manifests atuais não exercitam todos os tipos aceitos pelo runtime.
-- A suíte existente cobre somente `extractChapeu`; não há testes automatizados
-  das rotas, loaders, precedência, bindings, loading ou exportação.
+- A suíte automatizada cobre rotas HTTP, carregamento de templates, requisições
+  externas simuladas e o cliente HTTP seguro, mas não cobre precedência,
+  bindings, loading ou exportação no navegador.
 
 ## Riscos e limitações observados
 
-- URLs fornecidas pelo usuário são validadas principalmente por formato. Os
-  downloads do backend não demonstram bloqueio de loopback, redes privadas,
-  endereços reservados ou validação de destino após redirecionamentos.
-- O download de notícias tem timeout, mas não declara limite de bytes. O
-  download de SVG remoto em `assetResolver` não declara timeout nem limite.
+- Os downloads do backend passam pelo cliente compartilhado, que bloqueia
+  endereços não públicos e revalida redirecionamentos. Um teste local exercita
+  Axios, lookup e socket reais; respostas comprimidas e redirects reais ainda
+  não são exercitados de ponta a ponta.
+- Notícias, imagens e SVG remoto possuem timeout, limite de bytes e limite de
+  redirecionamentos. Notícias aceitam `text/html` e `application/xhtml+xml`;
+  SVG remoto exige `image/svg+xml`.
 - SVG remoto ou local é inserido como `innerHTML` no iframe sem sanitização
   observável.
 - O middleware global e algumas rotas retornam `error.message`, que pode conter

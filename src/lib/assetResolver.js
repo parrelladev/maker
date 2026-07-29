@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
+const safeHttpClient = require('./safeHttpClient');
+const { SVG_REQUEST_POLICY } = require('./remoteRequestPolicy');
+const { assertContentType } = safeHttpClient;
 
 const INPUT_DIR = path.resolve('input');
 const LOGO_EXTENSIONS = ['.svg', '.png', '.jpg', '.jpeg', '.webp'];
@@ -22,7 +24,11 @@ async function resolveLogoAsset(value, altText) {
 
   if (isRemoteUrl(value)) {
     if (/\.svg(\?|#|$)/i.test(value)) {
-      const response = await axios.get(value, { responseType: 'text' });
+      const response = await safeHttpClient.get(value, {
+        ...SVG_REQUEST_POLICY,
+        responseType: 'text',
+      });
+      assertContentType(response.headers?.['content-type'], ['image/svg+xml']);
       const markup = String(response.data || '').trim();
       if (!markup.includes('<svg')) {
         throw new Error(`Conteúdo SVG inválido em ${value}`);

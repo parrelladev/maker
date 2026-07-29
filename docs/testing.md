@@ -105,13 +105,16 @@ Não há configuração de limite mínimo de cobertura, snapshots ou setup globa
 
 ## Testes existentes
 
-Existem cinco arquivos:
+Existem oito arquivos:
 
 ```text
 src/server.test.js
 src/routes/templates.test.js
 src/routes/news.external.test.js
 src/lib/assetResolver.external.test.js
+src/lib/imageValidator.test.js
+src/lib/remoteRequestPolicy.test.js
+src/lib/safeHttpClient.test.js
 src/services/newsScraper.test.js
 ```
 
@@ -152,14 +155,38 @@ Essa suíte verifica:
 9. logo local e logo ausente.
 
 A suíte de `src/routes/news.external.test.js` caracteriza a incorporação de
-imagens com Axios mockado: URL pública, timeout, rejeição por tamanho, MIME
-inesperado, redirect público, destinos não públicos e redirect público para
-privado.
+imagens com o cliente compartilhado mockado: URL pública, timeout, rejeição por
+tamanho, MIME inesperado, corpo vazio, assinatura incompatível, erro inesperado
+sem exposição do detalhe, redirect público e bloqueio de destinos não públicos,
+inclusive após redirect. Ela também confirma a data URL e a mensagem estável
+quando a incorporação ocorre dentro de `/extract`.
 
 A suíte de `src/lib/assetResolver.external.test.js` caracteriza SVG remoto com
-Axios mockado. Ela registra a ausência atual de timeout, limite de resposta,
-validação MIME e limite explícito de redirects, além da aceitação de destinos
-não públicos.
+o cliente compartilhado mockado. Ela registra timeout, limite de resposta e
+redirects configurados, exigência de `image/svg+xml` e bloqueio de destinos não
+públicos.
+
+A suíte de `src/lib/imageValidator.test.js` cobre assinaturas reconhecidas de
+PNG, JPEG, GIF e WebP, parâmetros no MIME, tipos ausentes, genéricos ou
+incompatíveis, corpo vazio, corpo não binário, assinatura divergente, limite
+defensivo e erros estáveis. As fixtures exercitam somente a identificação
+básica por assinatura e não representam necessariamente arquivos completos ou
+decodificáveis.
+
+A suíte de `src/lib/remoteRequestPolicy.test.js` fixa os valores concretos dos
+perfis de HTML, imagem e SVG, incluindo timeout, limite de bytes, redirects,
+`User-Agent`s existentes e a imutabilidade das estruturas. Os testes dos três
+consumidores confirmam que esses mesmos valores chegam ao cliente compartilhado.
+
+A suíte de `src/lib/safeHttpClient.test.js` verifica protocolos, credenciais,
+resolução DNS, fixação do endereço, classificação de IPv4 e IPv6, respostas DNS
+mistas, redirects para destinos privados, limites configurados, timeout e erros
+classificados. Ela também reproduz o contrato Promise-based transformado por
+`util.callbackify` no Axios 1.12 e usa um servidor local para atravessar o
+adaptador Node, lookup e socket reais, confirmando o IP e o cabeçalho `Host`.
+Testes com relógio injetado verificam a deadline total, DNS pendente, DNS lento,
+saldo repassado a cada redirect, conclusão dentro do orçamento e remoção de
+timers em sucesso e erro.
 
 A suíte de `src/services/newsScraper.test.js` importa `extractChapeu`, cria
 fragmentos HTML em memória com Cheerio e verifica três comportamentos:
@@ -170,9 +197,10 @@ fragmentos HTML em memória com Cheerio e verifica três comportamentos:
    `label.text-tw-theme-box-kicker-default[id^="kicker-"]`;
 3. retorna `null` quando há apenas conteúdo comum antes do título.
 
-A mesma suíte caracteriza `newsScraper.fetch` com respostas Axios simuladas:
-URL pública, timeout, resposta acima de 12 MB, MIME inesperado, redirects e
-destinos não públicos.
+A mesma suíte caracteriza `newsScraper.fetch` com respostas do cliente
+compartilhado simuladas: URL pública, timeout, resposta acima de 5 MB, MIME
+HTML válido com parâmetros, rejeição de MIME ausente ou inesperado, redirects e
+bloqueio de destinos não públicos.
 
 ## Módulos e comportamentos cobertos
 
@@ -184,8 +212,11 @@ destinos não públicos.
 | `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes |
 | `src/lib/manifestLoader.js` | `listTemplates` e `loadManifest` por meio das rotas | descoberta, filtragem, parsing e validação dos arquivos mínimos |
 | `src/lib/assetResolver.js` | `resolveLogoAsset` | SVG local, fallback de logo ausente e download SVG remoto simulado |
-| `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros e destinos aceitos |
-| `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração Axios, respostas e destinos aceitos |
+| `src/lib/imageValidator.js` | `validateImageResponse` | allowlist de MIME, corpo binário, tamanho, vazio e assinaturas básicas |
+| `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
+| `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, contrato Axios e conexão local real |
+| `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros e bloqueios |
+| `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
 que todas as suas funções estejam cobertas. Não foi gerado relatório percentual
@@ -210,11 +241,9 @@ de cobertura.
 - resolução de `PORT` e `config.js`;
 - limite de 2 MB do parser JSON;
 - ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
-- integração real com o adaptador HTTP do Axios;
-- respostas comprimidas e streams interrompidos;
+- redirects reais, respostas comprimidas e streams interrompidos;
 - ordem dos arquivos CSS dentro de um mesmo diretório;
 - cache de logos;
-- proteção contra SSRF.
 
 ### Frontend
 
@@ -239,13 +268,13 @@ de cobertura.
 
 ### Segurança e uso de recursos
 
-- protocolos e tipos aceitos como URL;
-- loopback, link-local, redes privadas e endereços reservados;
-- resolução DNS e redirects para destinos não públicos;
-- limites de respostas remotas;
+- completude das faixas especiais conforme mudanças nos registros de endereços;
+- integração real de redirects para destinos não públicos;
+- imposição do limite durante recebimento pelo adaptador real;
 - respostas comprimidas;
 - timeouts;
-- MIME e conteúdo real de imagens;
+- decodificação completa, integridade estrutural, arquivos truncados e
+  políglotas;
 - exposição de detalhes internos;
 - SVG ativo e `innerHTML`;
 - isolamento do iframe;
@@ -260,12 +289,12 @@ de cobertura.
   processo filho para exercitar o Express e o entrypoint.
 - A suíte de templates troca temporariamente o `cwd` do processo e depende da
   execução serial configurada por `--runInBand`; cada teste restaura o diretório.
-- Axios é mockado nas suítes de requisições externas e `newsScraper` é mockado
-  nos testes HTTP que não exercitam extração. Não há chamadas reais à internet.
-- Redirects, endereço remoto e resolução privada de hostname são representados
-  por metadados das respostas mockadas. Isso demonstra que o código do Maker
-  não os inspeciona, mas não exercita DNS nem a implementação de redirects e
-  limites do adaptador HTTP real do Axios.
+- O cliente compartilhado é mockado nas suítes consumidoras. Sua suíte usa DNS
+  injetado e, no teste de integração, Axios e socket reais contra um servidor
+  exclusivamente local. `newsScraper` é mockado nos testes HTTP que não
+  exercitam extração. Não há chamadas reais à internet.
+- Redirects e resolução privada permanecem simulados. A conexão local exercita
+  o contrato real de lookup e socket, mas não redirects nem DNS do sistema.
 - O filesystem e as dependências do browser não possuem mocks ou pontos de
   injeção configurados.
 - O frontend depende de globais do DOM, iframe, CORS, fontes, imagens e
@@ -288,13 +317,13 @@ npm.cmd test
 Resultado observado:
 
 ```text
-Test Suites: 5 passed, 5 total
-Tests:       62 passed, 62 total
+Test Suites: 8 passed, 8 total
+Tests:       161 passed, 161 total
 Snapshots:   0 total
 ```
 
-Todos os 62 testes existentes passaram. As requisições externas são simuladas;
-esse resultado não demonstra bloqueio de destinos privados.
+Todos os 161 testes existentes passaram. Uma requisição controlada usa a pilha
+Axios/lookup/socket local; nenhuma chamada à internet é realizada.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.
 Os testes HTTP usam portas efêmeras e encerram seus servidores e processos.

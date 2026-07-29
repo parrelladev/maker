@@ -1,10 +1,14 @@
 const cheerio = require('cheerio');
-const axios = require('axios');
-const { nonPublicDestinations, publicUrl, redirectedPublicUrl, redirectedPrivateUrl } =
+const safeHttpClient = require('../lib/safeHttpClient');
+const { SafeHttpError } = jest.requireActual('../lib/safeHttpClient');
+const { nonPublicDestinations, publicUrl, redirectedPublicUrl } =
   require('../../test/helpers/remoteDestinations');
 const { fetch: fetchNews, extractChapeu } = require('./newsScraper');
 
-jest.mock('axios');
+jest.mock('../lib/safeHttpClient', () => ({
+  ...jest.requireActual('../lib/safeHttpClient'),
+  get: jest.fn(),
+}));
 
 describe('newsScraper.extractChapeu', () => {
   test('extrai o chapéu do layout atual da A Gazeta', () => {
@@ -68,11 +72,11 @@ describe('newsScraper.extractChapeu', () => {
 
 describe('newsScraper.fetch com respostas HTTP simuladas', () => {
   beforeEach(() => {
-    axios.get.mockReset();
+    safeHttpClient.get.mockReset();
   });
 
   test('extrai notícia de uma URL pública com timeout e User-Agent atuais', async () => {
-    axios.get.mockResolvedValue({
+    safeHttpClient.get.mockResolvedValue({
       data: `
         <meta property="og:title" content="Título público">
         <meta property="og:description" content="Descrição pública">
@@ -86,71 +90,95 @@ describe('newsScraper.fetch com respostas HTTP simuladas', () => {
       h2: 'Descrição pública',
       bg: 'https://public.example.test/image.jpg',
     });
-    expect(axios.get).toHaveBeenCalledWith(
+    expect(safeHttpClient.get).toHaveBeenCalledWith(
       publicUrl,
       expect.objectContaining({
         timeout: 10000,
+        maxBytes: 5 * 1024 * 1024,
+        maxRedirects: 3,
         headers: expect.objectContaining({ 'User-Agent': expect.any(String) }),
       })
     );
   });
 
   test('propaga timeout do download da notícia', async () => {
-    const error = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' });
-    axios.get.mockRejectedValue(error);
+    const error = new SafeHttpError('TIMEOUT');
+    safeHttpClient.get.mockRejectedValue(error);
 
     await expect(fetchNews(publicUrl)).rejects.toBe(error);
   });
 
-  test('aceita resposta de notícia acima de 12 MB porque não configura limite', async () => {
-    const oversizedHtml = `<title>Resposta grande</title><!--${'x'.repeat(
-      12 * 1024 * 1024 + 1
-    )}-->`;
-    axios.get.mockResolvedValue({ data: oversizedHtml, headers: { 'content-type': 'text/html' } });
+  test('propaga rejeição de notícia acima de 5 MB', async () => {
+    safeHttpClient.get.mockRejectedValue(new SafeHttpError('RESPONSE_TOO_LARGE'));
 
-    await expect(fetchNews(publicUrl)).resolves.toMatchObject({ h1: 'Resposta grande' });
-    expect(axios.get.mock.calls[0][1]).not.toHaveProperty('maxContentLength');
-    expect(axios.get.mock.calls[0][1]).not.toHaveProperty('maxBodyLength');
+    await expect(fetchNews(publicUrl)).rejects.toMatchObject({
+      code: 'RESPONSE_TOO_LARGE',
+    });
+    expect(safeHttpClient.get.mock.calls[0][1].maxBytes).toBe(5 * 1024 * 1024);
   });
 
-  test('não rejeita conteúdo de notícia com tipo inesperado', async () => {
-    axios.get.mockResolvedValue({
-      data: '<title>Tipo não validado</title>',
-      headers: { 'content-type': 'image/png' },
+  test.each(['image/png', 'text/plain'])(
+    'rejeita conteúdo de notícia com tipo inesperado: %s',
+    async (contentType) => {
+      safeHttpClient.get.mockResolvedValue({
+        data: '<title>Tipo inválido</title>',
+        headers: { 'content-type': contentType },
+      });
+
+      await expect(fetchNews(publicUrl)).rejects.toMatchObject({
+        code: 'UNEXPECTED_CONTENT_TYPE',
+        message: 'Servidor remoto retornou um tipo de conteúdo inválido',
+      });
+    }
+  );
+
+  test('rejeita notícia sem Content-Type', async () => {
+    safeHttpClient.get.mockResolvedValue({
+      data: '<title>Sem tipo</title>',
+      headers: {},
     });
 
-    await expect(fetchNews(publicUrl)).resolves.toMatchObject({ h1: 'Tipo não validado' });
+    await expect(fetchNews(publicUrl)).rejects.toMatchObject({
+      code: 'UNEXPECTED_CONTENT_TYPE',
+    });
   });
 
-  test('aceita resposta após redirecionamento público sem inspecionar o destino final', async () => {
-    axios.get.mockResolvedValue({
+  test.each(['text/html; charset=utf-8', 'application/xhtml+xml; charset=UTF-8'])(
+    'aceita tipo compatível com HTML e parâmetros: %s',
+    async (contentType) => {
+      safeHttpClient.get.mockResolvedValue({
+        data: '<title>Tipo válido</title>',
+        headers: { 'content-type': contentType },
+      });
+
+      await expect(fetchNews(publicUrl)).resolves.toMatchObject({ h1: 'Tipo válido' });
+    }
+  );
+
+  test('aceita resposta após redirecionamento público', async () => {
+    safeHttpClient.get.mockResolvedValue({
       data: '<title>Redirecionada</title>',
+      headers: { 'content-type': 'text/html' },
       request: { res: { responseUrl: redirectedPublicUrl } },
     });
 
     await expect(fetchNews(publicUrl)).resolves.toMatchObject({ h1: 'Redirecionada' });
-    expect(axios.get.mock.calls[0][1]).not.toHaveProperty('maxRedirects');
+    expect(safeHttpClient.get.mock.calls[0][1].maxRedirects).toBe(3);
   });
 
   test.each(nonPublicDestinations)(
     'encaminha destino não público: %s',
-    async (_, url, remoteAddress) => {
-      axios.get.mockResolvedValue({
-        data: '<title>Destino aceito</title>',
-        request: { socket: { remoteAddress } },
-      });
+    async (_, url) => {
+      safeHttpClient.get.mockRejectedValue(new SafeHttpError('BLOCKED_ADDRESS'));
 
-      await expect(fetchNews(url)).resolves.toMatchObject({ h1: 'Destino aceito' });
-      expect(axios.get).toHaveBeenCalledWith(url, expect.any(Object));
+      await expect(fetchNews(url)).rejects.toMatchObject({ code: 'BLOCKED_ADDRESS' });
+      expect(safeHttpClient.get).toHaveBeenCalledWith(url, expect.any(Object));
     }
   );
 
-  test('não rejeita redirecionamento de endereço público para privado', async () => {
-    axios.get.mockResolvedValue({
-      data: '<title>Destino privado</title>',
-      request: { res: { responseUrl: redirectedPrivateUrl } },
-    });
+  test('rejeita redirecionamento de endereço público para privado', async () => {
+    safeHttpClient.get.mockRejectedValue(new SafeHttpError('BLOCKED_ADDRESS'));
 
-    await expect(fetchNews(publicUrl)).resolves.toMatchObject({ h1: 'Destino privado' });
+    await expect(fetchNews(publicUrl)).rejects.toMatchObject({ code: 'BLOCKED_ADDRESS' });
   });
 });

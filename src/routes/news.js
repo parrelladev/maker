@@ -1,27 +1,33 @@
 const express = require('express');
-const axios = require('axios');
+const safeHttpClient = require('../lib/safeHttpClient');
+const { validateImageResponse } = require('../lib/imageValidator');
+const { IMAGE_REQUEST_POLICY } = require('../lib/remoteRequestPolicy');
 const newsScraper = require('../services/newsScraper');
+const { SafeHttpError } = safeHttpClient;
 
 const router = express.Router();
 
 async function embedImage(imageUrl) {
   if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) return imageUrl;
 
-  const response = await axios.get(imageUrl, {
-    responseType: 'arraybuffer',
-    timeout: 15000,
-    maxContentLength: 12 * 1024 * 1024,
-    maxBodyLength: 12 * 1024 * 1024,
-    maxRedirects: 3,
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Maker/1.0)' },
-  });
+  try {
+    const response = await safeHttpClient.get(imageUrl, {
+      ...IMAGE_REQUEST_POLICY,
+      responseType: 'arraybuffer',
+    });
 
-  const contentType = String(response.headers['content-type'] || '').split(';')[0];
-  if (!contentType.startsWith('image/')) {
-    throw new Error('A imagem extraída não possui um tipo válido');
+    const { contentType, buffer } = validateImageResponse(response, {
+      maxBytes: IMAGE_REQUEST_POLICY.maxBytes,
+    });
+
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch (error) {
+    if (error instanceof SafeHttpError) throw error;
+    if (error?.name === 'SafeHttpError' && typeof error.code === 'string') {
+      throw new SafeHttpError(error.code, { cause: error });
+    }
+    throw new SafeHttpError('REQUEST_FAILED', { cause: error });
   }
-
-  return `data:${contentType};base64,${Buffer.from(response.data).toString('base64')}`;
 }
 
 router.post('/extract', async (req, res) => {

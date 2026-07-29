@@ -18,9 +18,10 @@ Cada observação de segurança usa uma destas classificações:
 - **Hipótese a testar:** comportamento plausível cuja exploração ou resultado
   não foi demonstrado por teste automatizado ou teste de integração.
 
-“Defesa existente” não significa proteção completa. Por exemplo, aceitar apenas
-HTTP e HTTPS reduz protocolos possíveis, mas não impede acesso a endereços
-privados.
+“Defesa existente” não significa proteção completa. Os downloads do servidor,
+por exemplo, combinam restrição de protocolo com resolução DNS e classificação
+de endereços; a efetividade do transporte real ainda depende da integração com
+o adaptador HTTP e o sistema operacional.
 
 ## Visão geral e fronteiras de confiança
 
@@ -88,8 +89,8 @@ valores como HTML nos manifests atuais.
 | `GET /input/*` | caminho do recurso estático |
 
 `express.json({ limit: "2mb" })` impõe limite ao corpo JSON. Essa é uma
-**defesa existente** contra corpos JSON arbitrariamente grandes, mas não limita
-o tamanho de respostas remotas baixadas posteriormente.
+**defesa existente** contra corpos JSON arbitrariamente grandes. Os downloads
+remotos possuem limites separados por fluxo.
 
 As rotas não registram autenticação ou autorização no código atual. A
 possibilidade de qualquer cliente alcançá-las é um **risco dependente do
@@ -110,8 +111,9 @@ Depois que o backend inicia uma requisição, a origem remota controla:
 - markup de um SVG remoto configurado em manifest.
 
 O scraper reduz título, subtítulo e chapéu a limites de caracteres depois do
-download e do parse. Esses limites protegem o payload de saída desses campos,
-mas não limitam o HTML recebido ou o custo do Cheerio.
+download e do parse. Esses limites protegem o payload de saída desses campos;
+o cliente HTTP limita o HTML recebido, mas não o custo do parse dentro desse
+limite.
 
 ### Entradas locais e operacionais
 
@@ -136,23 +138,24 @@ Contrato:
 { "url": "https://exemplo.test/noticia" }
 ```
 
-A rota verifica apenas se `url` possui valor. Ela não verifica tipo, protocolo,
-hostname, endereço IP ou porta antes de chamar `newsScraper.fetch`.
+A rota verifica apenas se `url` possui valor antes de chamar
+`newsScraper.fetch`. O cliente HTTP compartilhado então exige uma string, aceita
+somente HTTP/HTTPS, rejeita credenciais, resolve o hostname e bloqueia qualquer
+resposta DNS não pública antes da conexão.
 
-`newsScraper.fetch` passa o valor diretamente a `axios.get`, com timeout de
-10 segundos e User-Agent de navegador.
-
-- **Vulnerabilidade confirmada pelo código — SSRF:** um cliente pode fornecer
-  uma URL HTTP(S) de loopback, link-local, rede privada ou endereço reservado, e
-  o servidor tentará acessá-la se houver conectividade.
-- **Defesa ausente:** allowlist de protocolos na própria rota.
-- **Defesa ausente:** resolução DNS e bloqueio de faixas não públicas.
-- **Defesa ausente:** validação do destino após cada redirect.
-- **Defesa ausente:** limite explícito para bytes da resposta.
-- **Defesa ausente:** validação do tipo de conteúdo como HTML.
-- **Defesa existente:** timeout de 10 segundos.
-- **Risco dependente do ambiente:** o alcance real do SSRF depende das redes,
-  credenciais implícitas, proxies e serviços acessíveis ao processo.
+- **Defesa existente:** bloqueio de loopback, link-local, redes privadas,
+  multicast, endereços reservados e não roteáveis em IPv4 e IPv6.
+- **Defesa existente:** nova resolução, classificação e fixação do endereço em
+  cada hostname alcançado por redirect, com máximo de três redirects.
+- **Defesa existente:** deadline total de 10 segundos, incluindo DNS, conexão,
+  recebimento e redirects, além de limite de 5 MB aplicado pelo adaptador
+  durante o recebimento, independentemente de `Content-Length`.
+- **Defesa existente:** aceita somente `text/html` e
+  `application/xhtml+xml`, ignorando parâmetros como `charset`; ausência ou
+  outro tipo gera erro classificado.
+- **Defesa existente:** teste local atravessa Axios, lookup e socket e confirma
+  o endereço fixado e o cabeçalho `Host`.
+- **Hipótese a testar:** redirects e respostas comprimidas com o adaptador real.
 
 Depois do parse, a URL de imagem extraída pode provocar uma segunda requisição
 no mesmo endpoint por meio de `embedImage`.
@@ -169,23 +172,26 @@ A implementação aplica a regex `^https?://` diretamente ao valor recebido, de
 forma case-insensitive. JavaScript pode coerzir valores que não são strings
 antes da aplicação da regex; portanto, não existe validação explícita de tipo.
 Determinados valores coercíveis, como um array contendo uma única URL HTTP(S),
-podem ser aceitos.
+passam pela regex, mas o cliente compartilhado os rejeita por não serem string.
 
 - **Defesa existente:** após a coerção realizada pelo JavaScript, a regex exige
   que a representação do valor comece com um prefixo HTTP ou HTTPS.
 - **Defesa ausente:** validação explícita de tipo para exigir uma string. Essa
-  ausência não constitui SSRF por si só.
+  ausência na rota não constitui SSRF por si só; o cliente aplica essa validação
+  antes da rede.
 - **Defesa existente:** timeout de 15 segundos.
 - **Defesa existente:** `maxContentLength` e `maxBodyLength` de 12 MB.
-- **Defesa existente:** máximo de três redirects configurado no Axios.
-- **Defesa existente:** exige `Content-Type` iniciado por `image/` antes de
-  produzir a data URL.
-- **Vulnerabilidade confirmada pelo código — SSRF:** a rota aceita destinos
-  HTTP(S) privados, locais e reservados e realiza o download no servidor.
-- **Defesa ausente:** validação semântica de URL, hostname, DNS, IP e porta.
-- **Defesa ausente:** validação de cada destino da cadeia de redirects.
-- **Defesa ausente:** confirmação de que os bytes correspondem ao formato
-  declarado no `Content-Type`.
+- **Defesa existente:** máximo de três redirects, com revalidação de cada
+  destino.
+- **Defesa existente:** permite somente `image/png`, `image/jpeg`, `image/gif`
+  e `image/webp`, aceitando parâmetros do MIME, antes de produzir a data URL.
+- **Defesa existente:** rejeita corpo vazio, repete defensivamente a verificação
+  do limite no buffer recebido e confere assinatura básica compatível com o
+  tipo declarado.
+- **Defesa existente:** protocolos, credenciais, DNS e endereços IPv4/IPv6 são
+  validados pelo cliente compartilhado antes da conexão.
+- **Limitação observada:** a assinatura identifica o contêiner básico, mas não
+  comprova que o arquivo inteiro seja uma imagem íntegra ou decodificável.
 - **Hipótese a testar:** comportamento exato dos limites com respostas
   comprimidas, streams interrompidos e redirects que mudam de protocolo.
 
@@ -203,26 +209,32 @@ usa a rede do servidor.
 
 | Local | Origem da URL | Timeout | Limite de resposta | Redirects | Tipo |
 | --- | --- | ---: | ---: | ---: | --- |
-| `newsScraper.fetch` | corpo de `/extract` | 10 s | nenhum explícito | padrão da biblioteca | não validado |
-| `routes/news.embedImage` | imagem extraída ou corpo de `/embed-image` | 15 s | 12 MB | 3 | exige `image/*` após download |
-| `assetResolver.resolveLogoAsset` | `defaultLogo` do manifest | nenhum explícito | nenhum explícito | padrão da biblioteca | apenas procura `<svg` no texto |
+| `newsScraper.fetch` | corpo de `/extract` | 10 s | 5 MB | 3 | `text/html` ou `application/xhtml+xml` |
+| `routes/news.embedImage` | imagem extraída ou corpo de `/embed-image` | 15 s | 12 MB | 3 | PNG, JPEG, GIF ou WebP com assinatura básica |
+| `assetResolver.resolveLogoAsset` | `defaultLogo` do manifest | 10 s | 1 MB | 3 | exige `image/svg+xml` e procura `<svg` |
 
-Não há cliente HTTP centralizado, política comum de saída ou validação
-compartilhada entre esses três fluxos.
+Os três fluxos usam `safeHttpClient`, que aplica a mesma validação de URL, DNS,
+endereços e redirects e retorna erros classificados. Os valores da tabela, o
+máximo compartilhado de redirects e os `User-Agent`s usados por HTML e imagem
+ficam centralizados em `src/lib/remoteRequestPolicy.js`; o perfil de SVG não
+adiciona um `User-Agent`.
 
 ### Redirects
 
-Somente `embedImage` declara `maxRedirects`, com valor três. Nenhum fluxo
-inspeciona o endereço resolvido antes da primeira conexão ou depois de um
-redirect.
+Todos os fluxos limitam a cadeia a três redirects. O cliente desativa redirects
+automáticos do Axios, interpreta cada `Location`, repete a validação e a
+resolução e só então inicia o salto seguinte. O `lookup` Promise-based não
+resolve DNS: ele entrega somente um endereço do conjunto previamente validado.
+Uma única deadline monotônica cobre a cadeia inteira; DNS e cada chamada Axios
+recebem apenas o tempo restante, sem reiniciar o timeout em cada salto.
 
-- **Vulnerabilidade confirmada pelo código:** redirects podem levar um download
-  inicialmente público a um destino privado, desde que a biblioteca e a rede
-  permitam a conexão.
-- **Defesa ausente:** callback ou transporte que revalide cada salto.
-- **Hipótese a testar:** quantidade exata de redirects aceita nos fluxos que
-  deixam o padrão do Axios e o comportamento diante de redirects relativos,
-  troca de protocolo e ciclos.
+- **Defesa existente:** um redirect público para destino privado é rejeitado.
+- **Defesa existente:** o cliente desabilita proxy para que a conexão use o
+  endereço validado pelo `lookup`.
+- **Defesa existente:** o teste de integração local confirma o endereço usado
+  pelo socket e a preservação do hostname no cabeçalho `Host`.
+- **Hipótese a testar:** redirects reais, ciclos, respostas comprimidas e falhas
+  entre resolução e socket.
 
 ## Conteúdo remoto incorporado
 
@@ -242,9 +254,9 @@ campos.
 
 O HTML inteiro, entretanto, é baixado e parseado antes dos limites textuais:
 
-- **Defesa ausente:** limite de bytes do HTML.
+- **Defesa existente:** limite de 5 MB durante o recebimento.
 - **Risco confirmado de consumo de recursos:** um cliente pode fazer o servidor
-  baixar e analisar respostas grandes repetidamente.
+  baixar e analisar repetidamente respostas dentro do limite.
 - **Risco dependente do ambiente:** impacto depende de memória, concorrência,
   limites do proxy e disponibilidade da aplicação.
 
@@ -257,8 +269,8 @@ resolução contra a URL da notícia e não passam pelo segundo download.
 A data URL é enviada no JSON, guardada no frontend e atribuída ao `src` indicado
 pelo manifest.
 
-- **Defesa existente:** timeout, limite declarado de 12 MB, três redirects e
-  checagem de `image/*`.
+- **Defesa existente:** timeout, limite de 12 MB, três redirects, allowlist de
+  MIME, corpo não vazio e assinatura básica de PNG, JPEG, GIF ou WebP.
 - **Defesa existente:** uma imagem incorporada deixa de exigir CORS durante a
   captura.
 - **Risco de consumo de recursos:** o buffer, a conversão base64 e a resposta
@@ -315,9 +327,12 @@ Para SVG remoto:
 
 - **Defesa ausente:** sanitização de elementos, atributos, URLs e event
   handlers.
-- **Defesa ausente:** timeout, limite de bytes e limite explícito de redirects.
-- **Defesa ausente:** validação de `Content-Type`.
-- **Defesa ausente:** bloqueio de destinos privados.
+- **Defesa existente:** timeout de 10 segundos, limite de 1 MB e máximo de três
+  redirects.
+- **Defesa existente:** exige `image/svg+xml`, aceitando parâmetros como
+  `charset`; tipo ausente ou incompatível gera erro classificado.
+- **Defesa existente:** validação compartilhada de protocolo, credenciais, DNS,
+  endereços e redirects.
 - **Risco dependente do ambiente:** exige que um manifest local confiado aponte
   para uma origem remota ou que o conteúdo dessa origem seja comprometido.
 - **Hipótese a testar — XSS:** verificar em navegadores suportados quais
@@ -462,15 +477,22 @@ do filesystem e da implantação.
 | Fluxo | Timeout | Limite de entrada/resposta | Redirects |
 | --- | ---: | --- | --- |
 | Corpo JSON da API | não aplicável no parser | 2 MB de entrada | não aplicável |
-| Download da notícia | 10 s | nenhum limite explícito de resposta | padrão do Axios |
-| Download de imagem | 15 s | 12 MB declarados | máximo 3 |
-| Download de SVG remoto | nenhum explícito | nenhum explícito | padrão do Axios |
+| Download da notícia | 10 s | 5 MB durante o recebimento | máximo 3 |
+| Download de imagem | 15 s | 12 MB durante o recebimento | máximo 3 |
+| Download de SVG remoto | 10 s | 1 MB durante o recebimento | máximo 3 |
 | Fetch de imagem no navegador | nenhum explícito | nenhum explícito | padrão do navegador |
 | Fontes e CSS externos | nenhum explícito no código da aplicação | nenhum explícito | navegador |
 
 Não há timeout global do Express, rate limiting, limite explícito de
 concorrência ou cancelamento das requisições externas quando o cliente
 desconecta.
+
+Os timeouts da tabela são deadlines totais de cada download, não limites
+renovados por etapa. Quando a deadline expira, o cliente deixa de aguardar DNS
+ou transporte e trata a falha como `TIMEOUT`. Isso não garante cancelamento
+físico de um resolver injetado ou outra operação subjacente sem suporte a
+cancelamento; sua conclusão tardia permanece observada internamente para evitar
+rejeições não tratadas, e o timer do cliente é removido ao concluir.
 
 ## Mensagens de erro e vazamento de informações
 
@@ -485,8 +507,10 @@ desconecta.
 | `/api/templates/:template/:page` em erro | 404 | mensagem fixa + `error.message` em `detail` |
 | middleware global | 500 | mensagem fixa + `err.message` em `detail` |
 
-Mensagens de filesystem podem conter caminhos absolutos. Mensagens do Axios
-podem revelar informações sobre resolução, conexão, protocolo ou destino.
+Mensagens de filesystem podem conter caminhos absolutos. Para os downloads, o
+cliente compartilhado traduz falhas conhecidas para mensagens fixas e
+classificadas, sem incluir URL, hostname ou endereço; erros de outras origens
+ainda podem trazer detalhes internos.
 
 - **Vulnerabilidade confirmada pelo código — exposição de detalhes:** valores
   de `error.message` são enviados ao cliente em múltiplas respostas.
@@ -514,14 +538,20 @@ O frontend registra erros de API, preview, bindings e geração no console.
 
 ### SSRF
 
-- **Confirmado pelo código:** `/extract` e `/embed-image` permitem requisições
-  do servidor a destinos HTTP(S) escolhidos direta ou indiretamente pelo
-  usuário, sem bloqueio de redes não públicas.
-- **Confirmado pelo código:** não há validação por salto de redirect.
+- **Defesa existente:** todos os downloads do servidor aceitam somente
+  HTTP/HTTPS sem credenciais, resolvem o hostname antes da conexão, rejeitam
+  respostas DNS não públicas e fixam um endereço validado.
+- **Defesa existente:** a classificação de `2001::/23` mantém bloqueadas as
+  atribuições não públicas, mas aceita as exceções globalmente alcançáveis
+  registradas pela
+  [IANA](https://www.iana.org/assignments/iana-ipv6-special-registry/).
+- **Defesa existente:** cada redirect repete a validação e a cadeia é limitada
+  a três saltos.
 - **Dependente do ambiente:** serviços internos alcançáveis, metadados de nuvem,
-  proxies, DNS e regras de firewall determinam o impacto.
-- **Defesas existentes:** timeouts; limite/tipo/redirects apenas no fluxo de
-  imagem.
+  DNS e regras de firewall determinam o impacto de qualquer falha ou faixa não
+  classificada; o cliente desabilita proxies nas requisições.
+- **Hipótese a testar:** redirects com o adaptador real, incluindo respostas DNS
+  múltiplas em cada salto.
 
 ### XSS e execução de conteúdo
 
@@ -537,10 +567,10 @@ O frontend registra erros de API, preview, bindings e geração no console.
 
 ### Consumo excessivo de recursos
 
-- **Confirmado pelo código:** notícia e SVG remoto não têm limite explícito de
-  resposta; não há rate limiting nem limite de concorrência.
-- **Defesas existentes:** corpo JSON de 2 MB; timeouts de notícia e imagem;
-  imagem limitada a 12 MB.
+- **Confirmado pelo código:** não há rate limiting nem limite de concorrência;
+  buffers, parsing e conversão base64 ainda consomem memória dentro dos limites.
+- **Defesas existentes:** corpo JSON de 2 MB; timeout e limite de resposta para
+  notícia, imagem e SVG; máximo de três redirects.
 - **Dependente do ambiente:** proxy, quantidade de processos, memória, CPU e
   conectividade influenciam disponibilidade.
 - **Hipóteses a testar:** memória sob concorrência, compressão, parse de HTML
@@ -556,24 +586,23 @@ O frontend registra erros de API, preview, bindings e geração no console.
 
 ## Cobertura e lacunas de verificação
 
-A suíte atual cobre apenas a extração de chapéu em três fragmentos HTML. Ela não
-cobre:
+A suíte atual cobre de forma unitária a validação de URL, classificação IPv4 e
+IPv6 — incluindo exceções públicas em `2001::/23` —, resolução DNS simulada,
+redirects, timeouts, limites, MIME e erros do cliente compartilhado. Um teste
+local atravessa Axios, lookup e socket sem internet. As suítes consumidoras
+simulam os três fluxos externos. Ela não cobre:
 
-- validação de URL ou protocolo;
-- bloqueio de IPs privados e reservados;
-- resolução DNS e redirects;
-- timeouts e limites;
-- tipos de conteúdo;
-- erros e detalhes expostos;
-- SVG local ou remoto;
+- integração real de redirects e compressão;
+- decodificação completa e integridade estrutural das imagens;
+- erros internos não originados no cliente compartilhado;
+- execução de SVG local ou remoto em navegador;
 - bindings e `innerHTML`;
 - construção do iframe;
-- parâmetros de template e página;
 - concorrência e consumo de memória;
 - comportamento de browser na exportação.
 
-Nenhuma garantia de segurança dos fluxos acima é demonstrada pelos testes
-atuais.
+Os testes demonstram as decisões e opções do cliente em isolamento, mas não
+constituem garantia de segurança da pilha de rede completa.
 
 ## Itens deliberadamente não concluídos neste documento
 
@@ -582,7 +611,6 @@ Este modelo registra o estado atual. Ele não:
 - define uma política futura completa;
 - escolhe bibliotecas de sanitização;
 - modifica mensagens ou contratos HTTP;
-- implementa bloqueio de rede;
 - altera o iframe;
 - estabelece limites operacionais ideais;
 - comprova hipóteses que exigem testes de integração ou navegador.

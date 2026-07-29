@@ -1,8 +1,7 @@
-const axios = require('axios');
 const cheerio = require('cheerio');
-
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const safeHttpClient = require('../lib/safeHttpClient');
+const { HTML_REQUEST_POLICY } = require('../lib/remoteRequestPolicy');
+const { assertContentType } = safeHttpClient;
 
 function cleanText(value, limit) {
   if (!value) return null;
@@ -41,10 +40,15 @@ function extractChapeu($) {
 }
 
 async function fetch(url) {
-  const { data: html } = await axios.get(url, {
-    headers: { 'User-Agent': USER_AGENT },
-    timeout: 10000,
+  const response = await safeHttpClient.get(url, {
+    ...HTML_REQUEST_POLICY,
+    responseType: 'text',
   });
+  assertContentType(response.headers?.['content-type'], [
+    'text/html',
+    'application/xhtml+xml',
+  ]);
+  const html = response.data;
 
   const $ = cheerio.load(html);
 
