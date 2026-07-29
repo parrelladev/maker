@@ -257,7 +257,9 @@ geração válida com conflito entre valores manuais e extraídos confirma a
 precedência da categoria e da imagem manuais, a aplicação da data URL
 incorporada ao preview e o envio desse preview ao exportador simulado.
 
-Testes diretos de `buildPreviewData` caracterizam a matriz completa de
+Testes diretos de `buildPreviewData` caracterizam sua integração com formulário
+e cache, enquanto testes unitários de `createArtworkData` exercitam a montagem
+pura do payload. Em conjunto, eles caracterizam a matriz completa de
 precedência usada na arte:
 
 | Dado | Ordem caracterizada |
@@ -310,7 +312,7 @@ botão são restaurados.
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
 | `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, matriz de precedência de textos, categoria, imagem, tema e logo, data URL extraída no preview/exportação e restauração do loading e botão nos caminhos cobertos |
-| `public/js/frontend-utils.js` | `validateGenerationInput` e transformações auxiliares | validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
+| `public/js/frontend-utils.js` | `createArtworkData`, `validateGenerationInput` e transformações auxiliares | payload completo da arte, precedência e fallbacks sem DOM ou globals; validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
 que todas as suas funções estejam cobertas. Não foi gerado relatório percentual
@@ -408,7 +410,7 @@ Comando:
 npm.cmd test
 ```
 
-Resultado observado: 13 suítes e 337 testes passaram. Uma
+Resultado observado: 13 suítes e 342 testes passaram. Uma
 requisição controlada usa a pilha Axios/lookup/socket local; nenhuma chamada à
 internet é realizada.
 

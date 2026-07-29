@@ -194,8 +194,9 @@ de imagem em HTTP e contém a função privada `embedImage`.
 
 `public/js/frontend-utils.js` expõe `window.FrontendUtils` e concentra
 validação de URL HTTP/HTTPS, validação da imagem efetiva, normalização de
-valores opcionais, escolha do ícone dos toasts e construção do nome do PNG. As
-funções não acessam o DOM e também são exportadas para testes unitários.
+valores opcionais, escolha do ícone dos toasts, construção do nome do PNG e
+montagem pura do payload da arte. As funções não acessam o DOM e também são
+exportadas para testes unitários.
 
 `public/script.js` mantém o catálogo visível, o estado global da tela e a
 orquestração dos fluxos. Ele também gera como string o runtime de bindings
@@ -459,7 +460,11 @@ em retornos antecipados dentro do `try`.
 
 ## Precedência de valores
 
-`buildPreviewData` estabelece a precedência usada ao atualizar o DOM:
+`buildPreviewData` lê o snapshot do formulário, seleciona os dados extraídos
+somente quando a URL do cache coincide com a URL atual e delega a montagem do
+payload a `createArtworkData`. Essa função pura recebe explicitamente dados do
+formulário, dados extraídos, manifest, logo resolvida, tema e override opcional
+de background. Ela estabelece a precedência usada ao atualizar o DOM:
 
 ```text
 título/subtítulo:
@@ -486,8 +491,8 @@ dimensões:
 ```
 
 Somente dados cujo `lastNewsUrl` coincide exatamente com o valor atual do campo
-de URL participam de `buildPreviewData`. Isso impede que o cache de uma notícia
-anterior seja usado após a URL ser editada.
+de URL são passados por `buildPreviewData` a `createArtworkData`. Isso impede
+que o cache de uma notícia anterior seja usado após a URL ser editada.
 
 Há uma diferença importante entre origem e conteúdo dos campos: depois de
 “Buscar dados”, valores textuais extraídos são copiados para os inputs manuais

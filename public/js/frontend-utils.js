@@ -129,8 +129,63 @@
     return `${templateName}-${pageName}.png`;
   }
 
+  function createArtworkData({
+    formData = {},
+    extractedData = {},
+    manifest = {},
+    resolvedLogo = null,
+    theme = null,
+    backgroundOverride = null
+  } = {}) {
+    const artworkManifest = manifest || {};
+    const effectiveTitle = formData.manualTitle || extractedData.h1 || '';
+    const effectiveSubtitle = formData.manualSubtitle || extractedData.h2 || '';
+    const extractedChapeu = extractedData.chapeu || '';
+    const effectiveTag = formData.manualCategory || extractedChapeu || '';
+    const effectiveBg = backgroundOverride || formData.manualImage || extractedData.bg || '';
+    const logoField = artworkManifest.logoField || 'logo';
+    const defaultLogo = artworkManifest.defaultLogo || 'logo-a-gazeta';
+    const themeName = theme || null;
+
+    const data = {
+      h1: effectiveTitle,
+      h2: effectiveSubtitle,
+      tag: effectiveTag,
+      chapeu: extractedChapeu || null,
+      bg: effectiveBg,
+      resolvedBg: effectiveBg,
+      themeName,
+      themeStylesheet: themeName ? `../css/theme-${themeName}.css` : null
+    };
+
+    data[logoField] = defaultLogo;
+
+    if (resolvedLogo && resolvedLogo.kind === 'inline-svg' && resolvedLogo.markup) {
+      data.resolvedLogo = {
+        kind: 'inline-svg',
+        markup: resolvedLogo.markup
+      };
+    } else if (resolvedLogo && resolvedLogo.kind === 'image' && resolvedLogo.src) {
+      data.resolvedLogo = {
+        kind: 'image',
+        src: resolvedLogo.src
+      };
+    } else {
+      const logoSrc = /^https?:\/\//i.test(defaultLogo)
+        ? defaultLogo
+        : `/input/${defaultLogo}`;
+
+      data.resolvedLogo = defaultLogo
+        ? { kind: 'image', src: logoSrc }
+        : null;
+    }
+
+    return data;
+  }
+
   return {
     buildExportFilename,
+    createArtworkData,
     getToastIcon,
     isHttpUrl,
     isValidRemoteImageUrl,

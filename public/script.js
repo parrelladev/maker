@@ -87,6 +87,7 @@ const storyTemplates = [
 
 const {
   buildExportFilename,
+  createArtworkData,
   getToastIcon,
   isHttpUrl,
   isValidResolvedImageValue,
@@ -767,67 +768,14 @@ function buildPreviewData(manifestData, backgroundOverride = null) {
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
   const extractedData = hasMatchingNews ? lastNewsData : {};
 
-  const manualTitle = formData.manualTitle;
-  const manualSubtitle = formData.manualSubtitle;
-  const manualTag = formData.manualCategory;
-  const manualBg = formData.manualImage;
-
-  const effectiveTitle = manualTitle || extractedData.h1 || '';
-  const effectiveSubtitle = manualSubtitle || extractedData.h2 || '';
-  const extractedChapeu = extractedData.chapeu || '';
-  const effectiveTag = manualTag || extractedChapeu || '';
-  const effectiveBg = backgroundOverride || manualBg || extractedData.bg || '';
-
-  const logoField = manifestData.manifest?.logoField || 'logo';
-  const defaultLogo = manifestData.manifest?.defaultLogo || 'logo-a-gazeta';
-
-  const themeName = formData.theme || null;
-  const themeStylesheet = themeName ? `../css/theme-${themeName}.css` : null;
-
-  const data = {
-    h1: effectiveTitle,
-    h2: effectiveSubtitle,
-    tag: effectiveTag,
-    chapeu: extractedChapeu || null,
-    bg: effectiveBg,
-    resolvedBg: effectiveBg,
-    themeName,
-    themeStylesheet
-  };
-
-  data[logoField] = defaultLogo;
-
-  const manifestResolvedLogo = manifestData.resolvedLogo || null;
-
-  if (manifestResolvedLogo && manifestResolvedLogo.kind === 'inline-svg' && manifestResolvedLogo.markup) {
-    data.resolvedLogo = {
-      kind: 'inline-svg',
-      markup: manifestResolvedLogo.markup
-    };
-  } else if (manifestResolvedLogo && manifestResolvedLogo.kind === 'image' && manifestResolvedLogo.src) {
-    data.resolvedLogo = {
-      kind: 'image',
-      src: manifestResolvedLogo.src
-    };
-  } else {
-    // fallback antigo: resolve logo para o preview, usando as mesmas convenções do generator:
-    // - se for URL absoluta (http/https), usa direto
-    // - se for um nome de arquivo (logo-a-gazeta.svg, logo-hz.png etc.), aponta para /input/<arquivo>
-    let logoSrc = null;
-    if (defaultLogo) {
-      if (/^https?:\/\//i.test(defaultLogo)) {
-        logoSrc = defaultLogo;
-      } else {
-        logoSrc = `/input/${defaultLogo}`;
-      }
-    }
-
-    data.resolvedLogo = logoSrc
-      ? { kind: 'image', src: logoSrc }
-      : null;
-  }
-
-  return data;
+  return createArtworkData({
+    formData,
+    extractedData,
+    manifest: manifestData.manifest,
+    resolvedLogo: manifestData.resolvedLogo,
+    theme: formData.theme,
+    backgroundOverride
+  });
 }
 
 async function updatePreview(backgroundOverride = null) {

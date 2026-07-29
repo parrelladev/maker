@@ -1,5 +1,6 @@
 const {
   buildExportFilename,
+  createArtworkData,
   getToastIcon,
   isHttpUrl,
   isValidRemoteImageUrl,
@@ -9,6 +10,100 @@ const {
 } = require('./frontend-utils');
 
 describe('frontend-utils', () => {
+  describe('createArtworkData', () => {
+    const formData = {
+      manualTitle: 'Título manual',
+      manualSubtitle: 'Subtítulo manual',
+      manualCategory: 'Categoria manual',
+      manualImage: 'https://example.com/manual.jpg'
+    };
+    const extractedData = {
+      h1: 'Título extraído',
+      h2: 'Subtítulo extraído',
+      chapeu: 'Categoria extraída',
+      bg: 'https://example.com/extraida.jpg'
+    };
+
+    test('constrói o payload completo com a precedência atual', () => {
+      expect(createArtworkData({
+        formData,
+        extractedData,
+        manifest: {
+          logoField: 'brand',
+          defaultLogo: 'logo-fallback.svg'
+        },
+        resolvedLogo: {
+          kind: 'inline-svg',
+          markup: '<svg><title>Logo</title></svg>'
+        },
+        theme: 'rosa',
+        backgroundOverride: 'data:image/jpeg;base64,/9j/AA=='
+      })).toEqual({
+        h1: 'Título manual',
+        h2: 'Subtítulo manual',
+        tag: 'Categoria manual',
+        chapeu: 'Categoria extraída',
+        bg: 'data:image/jpeg;base64,/9j/AA==',
+        resolvedBg: 'data:image/jpeg;base64,/9j/AA==',
+        themeName: 'rosa',
+        themeStylesheet: '../css/theme-rosa.css',
+        brand: 'logo-fallback.svg',
+        resolvedLogo: {
+          kind: 'inline-svg',
+          markup: '<svg><title>Logo</title></svg>'
+        }
+      });
+    });
+
+    test('usa dados extraídos quando os campos manuais estão vazios', () => {
+      expect(createArtworkData({
+        formData: {},
+        extractedData,
+        manifest: {},
+        resolvedLogo: { kind: 'image', src: '/input/logo.png' },
+        theme: null
+      })).toMatchObject({
+        h1: 'Título extraído',
+        h2: 'Subtítulo extraído',
+        tag: 'Categoria extraída',
+        chapeu: 'Categoria extraída',
+        bg: 'https://example.com/extraida.jpg',
+        resolvedBg: 'https://example.com/extraida.jpg',
+        resolvedLogo: { kind: 'image', src: '/input/logo.png' }
+      });
+    });
+
+    test.each([
+      ['logo-local.svg', '/input/logo-local.svg'],
+      ['https://cdn.example/logo.png', 'https://cdn.example/logo.png']
+    ])('preserva o fallback de logo para %s', (defaultLogo, expectedSrc) => {
+      expect(createArtworkData({
+        manifest: { defaultLogo }
+      })).toMatchObject({
+        logo: defaultLogo,
+        resolvedLogo: { kind: 'image', src: expectedSrc }
+      });
+    });
+
+    test('preserva todos os fallbacks na ausência de dados e de manifest', () => {
+      expect(createArtworkData({ manifest: null })).toEqual({
+        h1: '',
+        h2: '',
+        tag: '',
+        chapeu: null,
+        bg: '',
+        resolvedBg: '',
+        themeName: null,
+        themeStylesheet: null,
+        logo: 'logo-a-gazeta',
+        resolvedLogo: {
+          kind: 'image',
+          src: '/input/logo-a-gazeta'
+        }
+      });
+    });
+  });
+
   describe('isHttpUrl', () => {
     test.each([
       ['http://example.com/noticia', true],
