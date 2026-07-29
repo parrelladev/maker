@@ -105,7 +105,7 @@ Não há configuração de limite mínimo de cobertura, snapshots ou setup globa
 
 ## Testes existentes
 
-Existem dez arquivos:
+Existem onze arquivos:
 
 ```text
 src/server.test.js
@@ -118,6 +118,7 @@ src/lib/remoteRequestPolicy.test.js
 src/lib/safeHttpClient.test.js
 src/lib/svgSanitizer.test.js
 src/services/newsScraper.test.js
+src/services/templatePageService.test.js
 ```
 
 A suíte de `server.test.js` verifica:
@@ -223,6 +224,12 @@ compartilhado simuladas: URL pública, timeout, resposta acima de 5 MB, MIME
 HTML válido com parâmetros, rejeição de MIME ausente ou inesperado, redirects e
 bloqueio de destinos não públicos.
 
+A suíte de `src/services/templatePageService.test.js` injeta filesystem, loader,
+resolvedor de logo e logger. Ela confirma o modelo completo, CSS compartilhado
+antes do CSS específico da página, logos SVG e de imagem local ou remota,
+ausência de CSS e logo, fallback com warning e propagação de falha do manifest
+para a rota.
+
 ## Módulos e comportamentos cobertos
 
 ### Cobertura direta demonstrada
@@ -237,6 +244,7 @@ bloqueio de destinos não públicos.
 | `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
 | `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, contrato Axios e conexão local real |
 | `src/lib/svgSanitizer.js` | `sanitizeSvg` | XML estrito, gramáticas de valores, CSS local simples, referências locais, idempotência, limite e SVGs maliciosos representativos |
+| `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
 
@@ -338,12 +346,12 @@ npm.cmd test
 Resultado observado:
 
 ```text
-Test Suites: 10 passed, 10 total
-Tests:       206 passed, 206 total
+Test Suites: 11 passed, 11 total
+Tests:       212 passed, 212 total
 Snapshots:   0 total
 ```
 
-Todos os 206 testes existentes passaram. Uma requisição controlada usa a pilha
+Todos os 212 testes existentes passaram. Uma requisição controlada usa a pilha
 Axios/lookup/socket local; nenhuma chamada à internet é realizada.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.

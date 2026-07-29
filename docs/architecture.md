@@ -37,8 +37,10 @@ template em disco ──> backend ────+──> frontend
 │   │   ├── templates.js           # listagem e carregamento de templates
 │   │   └── news.js                # extração e incorporação de imagens
 │   ├── services/
-│   │   ├── newsScraper.js         # download e parsing de notícias
-│   │   └── newsScraper.test.js    # testes do chapéu
+│   │   ├── newsScraper.js              # download e parsing de notícias
+│   │   ├── newsScraper.test.js         # testes do chapéu
+│   │   ├── templatePageService.js      # montagem de página de template
+│   │   └── templatePageService.test.js # testes unitários da montagem
 │   └── lib/
 │       ├── manifestLoader.js       # descoberta e leitura de manifests
 │       ├── assetResolver.js        # resolução de logos locais/remotas
@@ -147,9 +149,14 @@ são rejeitados. O mesmo sanitizador atende assets locais e remotos.
 título, subtítulo, imagem e chapéu. O texto é normalizado e limitado. A
 responsabilidade de baixar a imagem extraída não pertence a esse serviço.
 
-`src/routes/templates.js` converte as operações do loader em HTTP, lê HTML e CSS
-e resolve a logo. `src/routes/news.js` converte extração e incorporação de
-imagem em HTTP e contém a função privada `embedImage`.
+`src/services/templatePageService.js` carrega e valida o manifest, lê HTML e
+CSS compartilhado e específico da página, resolve a logo e monta o modelo
+entregue pela API. Falhas ao resolver a logo são registradas e preservam
+`resolvedLogo: null`.
+
+`src/routes/templates.js` lista templates e converte o resultado ou os erros do
+serviço de página em HTTP. `src/routes/news.js` converte extração e incorporação
+de imagem em HTTP e contém a função privada `embedImage`.
 
 ### Frontend
 
@@ -196,10 +203,11 @@ Api.loadManifest(template, "index")
     v
 GET /api/templates/:template/:page
     |
-    +--> loadManifest() ──> manifest.json + index.html
-    +--> readCssFrom(template/css)
-    +--> readCssFrom(template/page)
-    +--> resolveLogoAsset(defaultLogo)
+    +--> templatePageService.loadTemplatePage()
+              +--> loadManifest() ──> manifest.json + index.html
+              +--> readCssFrom(template/css)
+              +--> readCssFrom(template/page)
+              +--> resolveLogoAsset(defaultLogo)
     |
     v
 { template, page, manifest, html, css[], resolvedLogo }
