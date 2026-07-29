@@ -58,6 +58,12 @@ e geram diagnóstico no log do servidor.
 
 Retorna manifest, HTML, CSS e logo resolvida da página.
 
+Falhas distinguem template ou página ausente (`404 TEMPLATE_NOT_FOUND`),
+manifest inválido (`500 TEMPLATE_INVALID`), arquivo obrigatório ilegível
+(`500 TEMPLATE_FILE_UNREADABLE`), asset remoto indisponível
+(`502 TEMPLATE_REMOTE_ASSET_FAILED`) e erro inesperado
+(`500 TEMPLATE_LOAD_FAILED`).
+
 ### `POST /api/news/extract`
 
 Extrai os dados usados pela arte.

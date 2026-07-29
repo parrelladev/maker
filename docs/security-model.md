@@ -530,7 +530,9 @@ rejeições não tratadas, e o timer do cliente é removido ao concluir.
 | `/api/news/embed-image` em erro | 422 | mensagem, código e detalhe reconstruído de categoria conhecida |
 | `/api/templates/:template/:page` ausente | 404 | `TEMPLATE_NOT_FOUND`, sem detalhe interno |
 | manifest inválido | 500 | `TEMPLATE_INVALID`, sem detalhe do parser |
-| falha inesperada ao carregar template | 500 | `TEMPLATE_LOAD_FAILED`, sem detalhe de filesystem |
+| arquivo obrigatório do template ilegível | 500 | `TEMPLATE_FILE_UNREADABLE`, sem detalhe de filesystem |
+| falha de asset remoto do template | 502 | `TEMPLATE_REMOTE_ASSET_FAILED`, sem URL ou detalhe de rede |
+| falha inesperada ao carregar template | 500 | `TEMPLATE_LOAD_FAILED`, sem detalhe interno |
 | middleware global, JSON malformado | 400 | `INVALID_JSON` |
 | middleware global, corpo acima de 2 MB | 413 | `PAYLOAD_TOO_LARGE` |
 | middleware global, erro inesperado | 500 | `INTERNAL_ERROR` |

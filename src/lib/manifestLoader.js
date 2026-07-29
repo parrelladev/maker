@@ -1,5 +1,10 @@
 const fs = require('fs').promises;
 const path = require('path');
+const {
+  TemplateManifestInvalidError,
+  TemplateNotFoundError,
+  TemplateRequiredFileUnreadableError,
+} = require('./templatePageErrors');
 
 const TEMPLATE_ROOT = path.resolve('templates');
 
@@ -21,13 +26,22 @@ async function exists(target) {
   }
 }
 
+async function ensureRequiredPath(target, notFoundMessage) {
+  try {
+    await fs.access(target);
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+      throw new TemplateNotFoundError(notFoundMessage, { cause: error });
+    }
+    throw new TemplateRequiredFileUnreadableError('Caminho obrigatório ilegível', {
+      cause: error,
+    });
+  }
+}
+
 async function ensureTemplateExists(templateDir, pageDir) {
-  if (!(await exists(templateDir))) {
-    throw new Error(`Template não encontrado: ${templateDir}`);
-  }
-  if (!(await exists(pageDir))) {
-    throw new Error(`Página do template não encontrada: ${pageDir}`);
-  }
+  await ensureRequiredPath(templateDir, `Template não encontrado: ${templateDir}`);
+  await ensureRequiredPath(pageDir, `Página do template não encontrada: ${pageDir}`);
 }
 
 async function loadManifest(template, page) {
@@ -38,14 +52,24 @@ async function loadManifest(template, page) {
 
   await ensureTemplateExists(templateDir, pageDir);
 
-  if (!(await exists(manifestPath))) {
-    throw new Error(`Manifesto não encontrado em ${manifestPath}`);
-  }
-  if (!(await exists(htmlPath))) {
-    throw new Error(`index.html não encontrado para ${template}/${page}`);
-  }
+  await ensureRequiredPath(
+    manifestPath,
+    `Manifesto não encontrado em ${manifestPath}`
+  );
+  await ensureRequiredPath(
+    htmlPath,
+    `index.html não encontrado para ${template}/${page}`
+  );
 
-  const manifest = await readJson(manifestPath);
+  let manifest;
+  try {
+    manifest = await readJson(manifestPath);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new TemplateManifestInvalidError('Manifesto inválido', { cause: error });
+    }
+    throw new TemplateRequiredFileUnreadableError('Manifesto ilegível', { cause: error });
+  }
   return {
     manifest,
     manifestPath,

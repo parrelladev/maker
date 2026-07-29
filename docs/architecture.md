@@ -225,9 +225,11 @@ sem ordenação explícita. O frontend concatena o conteúdo recebido na mesma
 ordem.
 
 Ausência de template, página, manifest ou HTML é convertida em HTTP 404 com
-`TEMPLATE_NOT_FOUND`. Manifest JSON inválido e falhas inesperadas de filesystem
-usam HTTP 500 com categorias públicas estáveis. Falhas ao resolver a logo são
-registradas internamente e resultam em `resolvedLogo: null`.
+`TEMPLATE_NOT_FOUND`. Manifest JSON inválido usa `500 TEMPLATE_INVALID`;
+arquivo obrigatório ilegível usa `500 TEMPLATE_FILE_UNREADABLE`; e falhas
+inesperadas usam `500 TEMPLATE_LOAD_FAILED`. Falhas ao resolver uma logo local
+são registradas internamente e resultam em `resolvedLogo: null`; falhas de
+assets remotos usam `502 TEMPLATE_REMOTE_ASSET_FAILED`.
 
 ## Extração de notícias
 

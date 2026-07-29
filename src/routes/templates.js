@@ -2,11 +2,27 @@ const express = require('express');
 const { listTemplates } = require('../lib/manifestLoader');
 const { logRequestError } = require('../lib/httpErrorResponse');
 const { loadTemplatePage } = require('../services/templatePageService');
+const {
+  TemplateManifestInvalidError,
+  TemplateNotFoundError,
+  TemplateRemoteAssetError,
+  TemplateRequiredFileUnreadableError,
+} = require('../lib/templatePageErrors');
 
 const router = express.Router();
 
 function getTemplateErrorResponse(error) {
-  if (error instanceof SyntaxError) {
+  if (error instanceof TemplateNotFoundError) {
+    return {
+      status: 404,
+      body: {
+        error: 'Template não encontrado',
+        code: 'TEMPLATE_NOT_FOUND',
+      },
+    };
+  }
+
+  if (error instanceof TemplateManifestInvalidError) {
     return {
       status: 500,
       body: {
@@ -16,21 +32,31 @@ function getTemplateErrorResponse(error) {
     };
   }
 
-  if (error?.code) {
+  if (error instanceof TemplateRequiredFileUnreadableError) {
     return {
       status: 500,
       body: {
-        error: 'Não foi possível carregar o template',
-        code: 'TEMPLATE_LOAD_FAILED',
+        error: 'Não foi possível ler um arquivo obrigatório do template',
+        code: 'TEMPLATE_FILE_UNREADABLE',
+      },
+    };
+  }
+
+  if (error instanceof TemplateRemoteAssetError) {
+    return {
+      status: 502,
+      body: {
+        error: 'Não foi possível resolver um asset remoto do template',
+        code: 'TEMPLATE_REMOTE_ASSET_FAILED',
       },
     };
   }
 
   return {
-    status: 404,
+    status: 500,
     body: {
-      error: 'Template não encontrado',
-      code: 'TEMPLATE_NOT_FOUND',
+      error: 'Não foi possível carregar o template',
+      code: 'TEMPLATE_LOAD_FAILED',
     },
   };
 }

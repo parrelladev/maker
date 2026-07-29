@@ -6,8 +6,15 @@ jest.mock('axios');
 const originalCwd = process.cwd();
 const fixtureWorkspace = path.resolve('test/fixtures/template-workspace');
 
-async function withTemplateServer(callback) {
+async function withTemplateServer(callback, createLoadError) {
   jest.resetModules();
+  if (createLoadError) {
+    const templatePageErrors = require('../lib/templatePageErrors');
+    const loadError = createLoadError(templatePageErrors);
+    jest.doMock('../services/templatePageService', () => ({
+      loadTemplatePage: jest.fn().mockRejectedValue(loadError),
+    }));
+  }
   const express = require('express');
   const templatesRouter = require('./templates');
   const app = express();
@@ -26,6 +33,7 @@ async function withTemplateServer(callback) {
     await new Promise((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
+    jest.dontMock('../services/templatePageService');
   }
 }
 
@@ -198,5 +206,54 @@ describe('rotas de templates com fixtures mínimas', () => {
       );
       expect(console.error).toHaveBeenCalled();
     });
+  });
+
+  test('retorna 500 específico para arquivo obrigatório ilegível', async () => {
+    await withTemplateServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/templates/fixture/valid`);
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({
+        error: 'Não foi possível ler um arquivo obrigatório do template',
+        code: 'TEMPLATE_FILE_UNREADABLE',
+      });
+      expect(JSON.stringify(body)).not.toMatch(/EACCES|template-workspace/i);
+      expect(console.error).toHaveBeenCalled();
+    }, ({ TemplateRequiredFileUnreadableError }) => (
+      new TemplateRequiredFileUnreadableError('EACCES em caminho interno')
+    ));
+  });
+
+  test('retorna 502 específico para falha de asset remoto', async () => {
+    await withTemplateServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/templates/fixture/valid`);
+      const body = await response.json();
+
+      expect(response.status).toBe(502);
+      expect(body).toEqual({
+        error: 'Não foi possível resolver um asset remoto do template',
+        code: 'TEMPLATE_REMOTE_ASSET_FAILED',
+      });
+      expect(JSON.stringify(body)).not.toMatch(/cdn\.example|timeout/i);
+      expect(console.error).toHaveBeenCalled();
+    }, ({ TemplateRemoteAssetError }) => (
+      new TemplateRemoteAssetError('timeout em https://cdn.example/logo.svg')
+    ));
+  });
+
+  test('retorna 500, e não 404, para erro interno inesperado', async () => {
+    await withTemplateServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/templates/fixture/valid`);
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({
+        error: 'Não foi possível carregar o template',
+        code: 'TEMPLATE_LOAD_FAILED',
+      });
+      expect(JSON.stringify(body)).not.toContain('falha inesperada');
+      expect(console.error).toHaveBeenCalled();
+    }, () => new Error('falha inesperada'));
   });
 });

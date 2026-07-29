@@ -2,6 +2,10 @@ const fs = require('fs').promises;
 const path = require('path');
 const { loadManifest } = require('../lib/manifestLoader');
 const { resolveLogoAsset } = require('../lib/assetResolver');
+const {
+  TemplateRemoteAssetError,
+  TemplateRequiredFileUnreadableError,
+} = require('../lib/templatePageErrors');
 
 function createTemplatePageService({
   fileSystem = fs,
@@ -59,6 +63,11 @@ function createTemplatePageService({
 
       return null;
     } catch (error) {
+      if (/^https?:\/\//i.test(defaultLogo)) {
+        throw new TemplateRemoteAssetError('Falha ao resolver asset remoto', {
+          cause: error,
+        });
+      }
       logger.warn(
         '[templates] falha ao resolver logo',
         { template, page, code: error?.code || 'LOGO_RESOLUTION_FAILED' },
@@ -70,7 +79,14 @@ function createTemplatePageService({
 
   async function loadTemplatePage(template, page) {
     const manifestInfo = await loadManifestFn(template, page);
-    const html = await fileSystem.readFile(manifestInfo.htmlPath, 'utf-8');
+    let html;
+    try {
+      html = await fileSystem.readFile(manifestInfo.htmlPath, 'utf-8');
+    } catch (error) {
+      throw new TemplateRequiredFileUnreadableError('index.html ilegível', {
+        cause: error,
+      });
+    }
     const sharedCss = await readCssFrom(pathModule.join(manifestInfo.templateDir, 'css'));
     const pageCss = await readCssFrom(manifestInfo.pageDir);
     const css = [...sharedCss, ...pageCss];

@@ -197,6 +197,21 @@ describe('templatePageService', () => {
     await expect(loadTemplatePage('fixture', 'index')).rejects.toBe(readError);
   });
 
+  test('classifica falha de leitura do HTML obrigatório', async () => {
+    const deps = createDependencies();
+    const readError = Object.assign(new Error('permission denied'), {
+      code: 'EACCES',
+    });
+    deps.fileSystem.readFile.mockRejectedValue(readError);
+    const { loadTemplatePage } = createTemplatePageService(deps);
+
+    await expect(loadTemplatePage('fixture', 'index')).rejects.toMatchObject({
+      name: 'TemplateRequiredFileUnreadableError',
+      code: 'TEMPLATE_FILE_UNREADABLE',
+      cause: readError,
+    });
+  });
+
   test('mantém resposta sem logo e registra falha de resolução', async () => {
     const logoError = new Error('logo indisponível');
     logoError.code = 'LOGO_ERROR';
@@ -219,6 +234,23 @@ describe('templatePageService', () => {
       },
       logoError
     );
+  });
+
+  test('propaga falha de resolução de logo remota com categoria própria', async () => {
+    const logoError = new Error('timeout remoto');
+    const deps = createDependencies({
+      manifest: { defaultLogo: 'https://cdn.example/logo.svg' },
+      logoError,
+      files: { [path.join('templates', 'fixture', 'index', 'index.html')]: '<main />' },
+    });
+    const { loadTemplatePage } = createTemplatePageService(deps);
+
+    await expect(loadTemplatePage('fixture', 'index')).rejects.toMatchObject({
+      name: 'TemplateRemoteAssetError',
+      code: 'TEMPLATE_REMOTE_ASSET_FAILED',
+      cause: logoError,
+    });
+    expect(deps.logger.warn).not.toHaveBeenCalled();
   });
 
   test('propaga erros de carregamento do manifest para a camada HTTP', async () => {
