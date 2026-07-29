@@ -31,9 +31,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(config.port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Servidor rodando em http://localhost:${config.port}`);
-});
+if (require.main === module) {
+  app.listen(config.port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`Servidor rodando em http://localhost:${config.port}`);
+  });
+}
 
 module.exports = app;

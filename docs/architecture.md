@@ -31,6 +31,7 @@ template em disco ──> backend ────+──> frontend
 .
 ├── src/
 │   ├── server.js                  # composição e inicialização do Express
+│   ├── server.test.js             # testes HTTP e do entrypoint
 │   ├── appConfig.js               # resolução da porta
 │   ├── routes/
 │   │   ├── templates.js           # listagem e carregamento de templates
@@ -73,8 +74,9 @@ respectivamente, em `/input` e `/templates`. Isso permite que o documento do
 
 `src/server.js` cria o Express, configura JSON com limite de 2 MB, monta os
 diretórios estáticos e os routers, registra uma resposta para `/`, um middleware
-global de erro e inicia a escuta. O módulo exporta `app`, mas a chamada a
-`app.listen` ocorre durante sua importação.
+global de erro e exporta `app`. A escuta é iniciada somente quando o arquivo é
+executado diretamente, protegida por `require.main === module`; importar o
+módulo não abre uma porta.
 
 `src/appConfig.js` resolve a porta nesta ordem:
 
@@ -419,7 +421,7 @@ um card estático pode apontar para conteúdo ausente.
 No backend:
 
 - leitura síncrona de configuração, manifests, HTML, CSS, logos e diretórios;
-- abertura da porta HTTP durante a avaliação de `server.js`;
+- abertura da porta HTTP quando `server.js` é executado como entrypoint;
 - requisições HTTP para notícias, imagens e SVGs remotos;
 - mutação dos caches em memória;
 - logs de configuração, servidor, chapéu e erros;
@@ -439,8 +441,8 @@ No frontend:
 
 ## Pontos atualmente difíceis de testar
 
-- `server.js` inicia a escuta ao ser importado, dificultando testes isolados da
-  composição do Express.
+- A composição do Express permanece no mesmo módulo do entrypoint, embora o
+  guard de `require.main` permita importar o app sem abrir a porta configurada.
 - As rotas acessam diretamente filesystem, Axios e serviços importados, sem
   pontos explícitos de injeção.
 - `templates.js` combina roteamento, leitura de HTML/CSS, ordenação, resolução

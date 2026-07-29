@@ -94,10 +94,10 @@ no mesmo processo de worker.
 
 Essa configuração contribui para a repetibilidade da suíte atual, que:
 
-- não acessa a rede;
+- usa apenas rede local em portas efêmeras nos testes HTTP;
 - não depende de relógio;
 - não grava no filesystem;
-- não inicia o Express;
+- inicia e encerra servidores HTTP locais controlados pelos testes;
 - não abre navegador;
 - não usa fixtures externas.
 
@@ -105,11 +105,20 @@ Não há configuração de limite mínimo de cobertura, snapshots ou setup globa
 
 ## Testes existentes
 
-Existe um único arquivo:
+Existem dois arquivos:
 
 ```text
+src/server.test.js
 src/services/newsScraper.test.js
 ```
+
+A suíte de `server.test.js` verifica:
+
+1. importar a aplicação sem chamar `app.listen`;
+2. usar o app em um servidor HTTP local com porta efêmera;
+3. servir a interface em `GET /`;
+4. manter registradas a listagem de templates e a rota de extração de notícias;
+5. iniciar o servidor ao executar `src/server.js` como entrypoint.
 
 A suíte importa `extractChapeu` de `src/services/newsScraper.js`, cria fragmentos
 HTML em memória com Cheerio e verifica três comportamentos:
@@ -126,6 +135,7 @@ HTML em memória com Cheerio e verifica três comportamentos:
 
 | Módulo | Símbolo | Comportamento demonstrado |
 | --- | --- | --- |
+| `src/server.js` | `app` e guard do entrypoint | importação sem listener, uso HTTP, rotas básicas e inicialização direta |
 | `src/services/newsScraper.js` | `extractChapeu` | layout atual, layout legado e ausência de correspondência |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
@@ -150,14 +160,11 @@ de cobertura.
 
 ### Backend
 
-- composição e inicialização do Express;
 - resolução de `PORT` e `config.js`;
 - parser JSON e limite de 2 MB;
-- arquivos estáticos;
-- contratos, status e mensagens das rotas;
-- `GET /api/templates`;
+- ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
+- contratos, status e mensagens não exercitados das rotas;
 - `GET /api/templates/:template/:page`;
-- `POST /api/news/extract`;
 - `POST /api/news/embed-image`;
 - listagem e carregamento de manifests;
 - manifests inexistentes ou com JSON inválido;
@@ -210,9 +217,8 @@ de cobertura.
 - A baseline foi executada em uma única combinação de Windows, Node e npm.
 - Não existe CI ou matriz de versões observável nos arquivos do repositório.
 - Não há `jsdom`, browser real ou ferramenta end-to-end configurada.
-- Não há `supertest` ou harness equivalente para exercitar o Express.
-- `src/server.js` chama `app.listen` ao ser importado, o que dificulta testes
-  isolados da aplicação HTTP.
+- Não há `supertest`; o harness atual usa `http.createServer`, `fetch` e um
+  processo filho para exercitar o Express e o entrypoint.
 - Axios, filesystem e dependências do browser não possuem mocks ou pontos de
   injeção configurados.
 - O frontend depende de globais do DOM, iframe, CORS, fontes, imagens e
@@ -235,13 +241,14 @@ npm.cmd test
 Resultado observado:
 
 ```text
-Test Suites: 1 passed, 1 total
-Tests:       3 passed, 3 total
+Test Suites: 2 passed, 2 total
+Tests:       7 passed, 7 total
 Snapshots:   0 total
 ```
 
-Todos os testes existentes passaram. Esse resultado confirma somente os três
-cenários de `extractChapeu` descritos neste documento.
+Todos os testes existentes passaram. Esse resultado confirma os quatro cenários
+da aplicação Express e os três cenários de `extractChapeu` descritos neste
+documento.
 
-Nenhum ajuste de código, script, dependência ou teste foi necessário para obter
-uma execução determinística da suíte existente.
+O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.
+Os testes HTTP usam portas efêmeras e encerram seus servidores e processos.
