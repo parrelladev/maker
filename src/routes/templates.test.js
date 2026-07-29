@@ -46,7 +46,7 @@ describe('rotas de templates com fixtures mínimas', () => {
     process.chdir(originalCwd);
   });
 
-  test('lista manifest válido, omite manifest ausente e preserva JSON inválido', async () => {
+  test('lista somente páginas com manifest e HTML válidos', async () => {
     await withTemplateServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/templates`);
       const templates = await response.json();
@@ -55,11 +55,6 @@ describe('rotas de templates com fixtures mínimas', () => {
 
       expect(response.status).toBe(200);
       expect(pagesByName).toEqual([
-        { name: 'invalid-manifest' },
-        {
-          name: 'missing-html',
-          dimensions: { width: 320, height: 480 },
-        },
         {
           name: 'missing-logo',
           defaultLogo: 'missing-logo.svg',
@@ -72,7 +67,42 @@ describe('rotas de templates com fixtures mínimas', () => {
           dimensions: { width: 320, height: 480 },
         },
       ]);
+      expect(console.warn).toHaveBeenCalledTimes(3);
+      expect(console.warn).toHaveBeenCalledWith(
+        '[templates] página ignorada na listagem',
+        expect.objectContaining({
+          template: 'fixture',
+          page: 'invalid-manifest',
+          code: 'TEMPLATE_MANIFEST_INVALID',
+        })
+      );
     });
+  });
+
+  test('expõe diagnósticos internos para cada motivo de página inválida', async () => {
+    jest.resetModules();
+    const { inspectTemplateCatalog } = require('../lib/manifestLoader');
+
+    const catalog = await inspectTemplateCatalog();
+
+    expect(catalog.diagnostics).toEqual(expect.arrayContaining([
+      {
+        template: 'fixture',
+        page: 'missing-manifest',
+        code: 'TEMPLATE_MANIFEST_MISSING',
+      },
+      {
+        template: 'fixture',
+        page: 'invalid-manifest',
+        code: 'TEMPLATE_MANIFEST_INVALID',
+      },
+      {
+        template: 'fixture',
+        page: 'missing-html',
+        code: 'TEMPLATE_HTML_MISSING',
+      },
+    ]));
+    expect(catalog.diagnostics).toHaveLength(3);
   });
 
   test('carrega HTML, CSS compartilhado, CSS da página e logo local', async () => {

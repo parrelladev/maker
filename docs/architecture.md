@@ -95,11 +95,14 @@ módulo não abre uma porta.
 2. `port` de `config.js`, caso o arquivo exista e possa ser importado;
 3. valor padrão `3000`.
 
-`src/lib/manifestLoader.js` conhece a estrutura física de `templates`. A função
-`listTemplates` percorre templates e subdiretórios, lendo manifests existentes.
-Um JSON inválido é mantido na listagem como `manifestError`. A função
-`loadManifest` valida a presença dos diretórios, do manifest e do `index.html` e
-retorna o manifest junto com os caminhos resolvidos.
+`src/lib/manifestLoader.js` conhece a estrutura física de `templates`.
+`inspectTemplateCatalog` percorre templates e páginas e separa o catálogo válido
+dos diagnósticos internos. Manifest ausente, JSON inválido e `index.html`
+ausente invalidam somente a página correspondente. `listTemplates` retorna o
+catálogo válido e registra os diagnósticos; templates sem páginas válidas não
+entram na lista pública. `loadManifest` valida a presença dos diretórios, do
+manifest e do `index.html` e retorna o manifest junto com os caminhos
+resolvidos.
 
 `src/lib/assetResolver.js` resolve a logo padrão declarada no manifest:
 
@@ -183,11 +186,14 @@ fontes e imagens, verifica imagens HTTP(S), chama `html-to-image` dentro do
 
 Há dois mecanismos distintos de listagem:
 
-1. `GET /api/templates` lista o conteúdo encontrado no filesystem por meio de
-   `listTemplates`. Para páginas com manifest válido, a resposta expõe nome,
-   logo e dimensões. Páginas cujo manifest contém JSON inválido ainda podem
-   aparecer na resposta apenas com `name`: `manifestError` não é exposto pela
-   rota, e logo e dimensões ficam indefinidas.
+1. `GET /api/templates` lista o conteúdo válido encontrado no filesystem por
+   meio de `listTemplates`. A resposta expõe nome, logo e dimensões somente de
+   páginas que possuam manifest com JSON válido e `index.html`. Manifest
+   ausente, JSON inválido ou HTML ausente gera um diagnóstico interno com
+   template, página e código estável, é registrado no servidor e não impede que
+   as demais páginas sejam retornadas. Testes e ferramentas internas podem
+   consultar `{ templates, diagnostics }` por `inspectTemplateCatalog`; os
+   diagnósticos não fazem parte da API pública.
 2. A interface atual não consome esse endpoint. Os cards são construídos a
    partir do array estático `storyTemplates` em `public/script.js`, que também
    define grupos, nomes, miniaturas, temas e estado “Em construção”.

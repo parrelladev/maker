@@ -57,13 +57,14 @@ async function loadManifest(template, page) {
   };
 }
 
-async function listTemplates() {
+async function inspectTemplateCatalog() {
   if (!(await exists(TEMPLATE_ROOT))) {
-    return [];
+    return { templates: [], diagnostics: [] };
   }
 
   const templateEntries = await fs.readdir(TEMPLATE_ROOT, { withFileTypes: true });
   const templates = [];
+  const diagnostics = [];
 
   for (const templateName of templateEntries
     .filter((entry) => entry.isDirectory())
@@ -74,36 +75,67 @@ async function listTemplates() {
 
     for (const pageName of pageEntries
       .filter((dirent) => dirent.isDirectory())
+      .filter((dirent) => !['css', 'fonts'].includes(dirent.name))
       .map((dirent) => dirent.name)) {
       const manifestPath = getManifestPath(templateName, pageName);
+      const htmlPath = path.join(templateDir, pageName, 'index.html');
+
       if (!(await exists(manifestPath))) {
+        diagnostics.push({
+          template: templateName,
+          page: pageName,
+          code: 'TEMPLATE_MANIFEST_MISSING',
+        });
         continue;
       }
+
+      if (!(await exists(htmlPath))) {
+        diagnostics.push({
+          template: templateName,
+          page: pageName,
+          code: 'TEMPLATE_HTML_MISSING',
+        });
+        continue;
+      }
+
       try {
         const manifest = await readJson(manifestPath);
         pages.push({
           name: pageName,
           manifest,
           manifestPath,
-          htmlPath: path.join(templateDir, pageName, 'index.html'),
+          htmlPath,
         });
       } catch (error) {
-        pages.push({
-          name: pageName,
-          manifestError: error.message,
-          manifestPath,
-          htmlPath: path.join(templateDir, pageName, 'index.html'),
+        if (!(error instanceof SyntaxError)) {
+          throw error;
+        }
+        diagnostics.push({
+          template: templateName,
+          page: pageName,
+          code: 'TEMPLATE_MANIFEST_INVALID',
         });
       }
     }
 
-    templates.push({ template: templateName, pages });
+    if (pages.length > 0) {
+      templates.push({ template: templateName, pages });
+    }
   }
 
+  return { templates, diagnostics };
+}
+
+async function listTemplates({ logger = console } = {}) {
+  const { templates, diagnostics } = await inspectTemplateCatalog();
+  for (const diagnostic of diagnostics) {
+    logger.warn('[templates] página ignorada na listagem', diagnostic);
+  }
   return templates;
 }
 
 module.exports = {
+  inspectTemplateCatalog,
   loadManifest,
   listTemplates,
 };

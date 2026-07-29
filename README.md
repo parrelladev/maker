@@ -49,7 +49,10 @@ Não existe uma segunda renderização no backend: o arquivo baixado é produzid
 
 ### `GET /api/templates`
 
-Lista os templates e páginas disponíveis.
+Lista somente templates que possuam ao menos uma página válida. Uma página é
+válida para a listagem quando contém `manifest.json` com JSON válido e
+`index.html`. Páginas inválidas são omitidas sem impedir a listagem das demais
+e geram diagnóstico no log do servidor.
 
 ### `GET /api/templates/:template/:page`
 

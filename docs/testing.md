@@ -162,6 +162,9 @@ Essa suíte verifica:
 
 Os caminhos negativos confirmam respostas 404 estáveis sem paths para recursos
 ausentes e resposta 500 sem detalhe do parser para manifest JSON inválido.
+Na listagem, ela também confirma que manifest ausente, JSON inválido e HTML
+ausente são omitidos sem derrubar a resposta, geram logs de diagnóstico e
+permanecem consultáveis internamente por `inspectTemplateCatalog`.
 
 A suíte de `src/routes/news.external.test.js` caracteriza a incorporação de
 imagens com o cliente compartilhado mockado: URL pública, timeout, rejeição por
@@ -238,7 +241,7 @@ para a rota.
 | --- | --- | --- |
 | `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erros públicos, delegação após `headersSent` e inicialização direta |
 | `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes e erros públicos sem paths |
-| `src/lib/manifestLoader.js` | `listTemplates` e `loadManifest` por meio das rotas | descoberta, filtragem, parsing e validação dos arquivos mínimos |
+| `src/lib/manifestLoader.js` | `inspectTemplateCatalog`, `listTemplates` e `loadManifest` | descoberta, diagnósticos internos, filtragem, parsing e validação dos arquivos mínimos |
 | `src/lib/assetResolver.js` | `resolveLogoAsset` | SVG local, fallback de logo ausente e download SVG remoto simulado |
 | `src/lib/imageValidator.js` | `validateImageResponse` | allowlist de MIME, corpo binário, tamanho, vazio e assinaturas básicas |
 | `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
