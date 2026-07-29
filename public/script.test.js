@@ -95,7 +95,7 @@ class BindingElement extends FakeElement {
   }
 }
 
-function createHarness() {
+function createHarness({ autoResolveRuntime = true } = {}) {
   jest.useFakeTimers();
 
   const ids = [
@@ -123,7 +123,11 @@ function createHarness() {
   const frameDocument = {
     open: jest.fn(),
     write: jest.fn(),
-    close: jest.fn()
+    close: jest.fn(() => {
+      if (autoResolveRuntime) {
+        elements.previewFrame.contentWindow.__resolvePreviewRuntimeReady?.();
+      }
+    })
   };
   elements.previewFrame.contentDocument = frameDocument;
   elements.previewFrame.contentWindow = { document: frameDocument };
@@ -213,8 +217,11 @@ function createHarness() {
   };
 }
 
-async function createBindingRuntimeHarness(manifest, targetsBySelector = {}) {
-  const parentHarness = createHarness();
+async function createBindingRuntimeHarness(
+  manifest,
+  targetsBySelector = {}
+) {
+  const parentHarness = createHarness({ autoResolveRuntime: false });
   parentHarness.loadManifest.mockResolvedValue({
     template: 'binding-fixture',
     page: 'index',
@@ -223,34 +230,29 @@ async function createBindingRuntimeHarness(manifest, targetsBySelector = {}) {
     html: ''
   });
 
-  await parentHarness.run(`
-    currentTemplate = 'binding-fixture';
-    ensurePreviewInitialized();
-  `);
-
-  const iframeHtml = parentHarness.frameDocument.write.mock.calls[0][0];
-  const runtimeMatch = iframeHtml.match(
-    /<script>\s*(\(function \(\) \{[\s\S]*\}\)\(\);)\s*<\/script>/
-  );
-  if (!runtimeMatch) {
-    throw new Error('Runtime de bindings não encontrado no documento do iframe');
-  }
-
   const documentElement = new BindingElement('html');
   documentElement.clientWidth = 1080;
   const body = new BindingElement('body');
+  const head = new BindingElement('head');
+  const frameDocument = parentHarness.frameDocument;
+  Object.assign(frameDocument, {
+    body,
+    documentElement,
+    head,
+    createElement(tagName) {
+      return new BindingElement(tagName);
+    },
+    querySelectorAll(selector) {
+      return targetsBySelector[selector] || [];
+    }
+  });
+
   const context = {
     console: {
       ...console,
       error: jest.fn()
     },
-    document: {
-      body,
-      documentElement,
-      querySelectorAll(selector) {
-        return targetsBySelector[selector] || [];
-      }
-    },
+    document: frameDocument,
     innerHeight: 1920,
     innerWidth: 1080,
     setTimeout,
@@ -258,26 +260,187 @@ async function createBindingRuntimeHarness(manifest, targetsBySelector = {}) {
     addEventListener: jest.fn()
   };
   context.window = context;
+  parentHarness.elements.previewFrame.contentDocument = frameDocument;
+  parentHarness.elements.previewFrame.contentWindow = context;
   vm.createContext(context);
-  vm.runInContext(runtimeMatch[1], context, {
-    filename: 'iframe-binding-runtime.js'
+
+  const documentWritten = createDeferred();
+  frameDocument.write.mockImplementation(html => {
+    documentWritten.resolve(html);
   });
+  const initialization = parentHarness.run(`
+    currentTemplate = 'binding-fixture';
+    ensurePreviewInitialized();
+  `);
+  const iframeHtml = await documentWritten.promise;
+  const inlineScripts = Array.from(
+    iframeHtml.matchAll(/<script>([\s\S]*?)<\/script>/g),
+    match => match[1]
+  );
+  if (inlineScripts.length !== 1) {
+    throw new Error('Bootstrap do runtime não encontrado no documento do iframe');
+  }
+  const runtimeSource = fs.readFileSync(
+    path.join(__dirname, 'js', 'preview-runtime.js'),
+    'utf8'
+  );
+  let runtimeScript = null;
+
+  function runBootstrap() {
+    vm.runInContext(inlineScripts[0], context, {
+      filename: 'preview-runtime-bootstrap.js'
+    });
+    runtimeScript = head.children.at(-1);
+    return runtimeScript;
+  }
+
+  function loadRuntime() {
+    vm.runInContext(runtimeSource, context, {
+      filename: 'public/js/preview-runtime.js'
+    });
+    runtimeScript.dispatch('load');
+  }
 
   return {
     context,
     documentElement,
+    failRuntimeInitialization() {
+      context.PreviewRuntime = {
+        initialize() {
+          throw new Error('falha interna');
+        },
+        update: jest.fn(),
+        applyScale: jest.fn(),
+        handleResize: jest.fn()
+      };
+      runtimeScript.dispatch('load');
+    },
+    failRuntimeInvalidApi() {
+      context.PreviewRuntime = {};
+      runtimeScript.dispatch('load');
+    },
+    failRuntimeLoad() {
+      runtimeScript.dispatch('error');
+    },
+    initialization,
+    loadRuntime,
+    parentHarness,
+    runBootstrap,
     update(data) {
       context.__updatePreview(data);
     }
   };
 }
 
-describe('runtime de bindings construído em public/script.js', () => {
+async function createReadyBindingRuntimeHarness(
+  manifest,
+  targetsBySelector = {},
+  { pendingUpdatesBeforeRuntime = [] } = {}
+) {
+  const harness = await createBindingRuntimeHarness(manifest, targetsBySelector);
+  harness.runBootstrap();
+  pendingUpdatesBeforeRuntime.forEach(data => {
+    harness.update(data);
+  });
+  harness.loadRuntime();
+  await harness.initialization;
+  return harness;
+}
+
+describe('runtime de bindings carregado por public/script.js', () => {
+  test('mantém readiness pendente até carregar, inicializar e drenar a fila', async () => {
+    const target = new BindingElement();
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        { selector: '#title', field: 'title' }
+      ]
+    }, {
+      '#title': [target]
+    });
+    let ready = false;
+    runtime.initialization.then(() => {
+      ready = true;
+    });
+
+    runtime.runBootstrap();
+    runtime.update({ title: 'Título pendente' });
+    await Promise.resolve();
+
+    expect(ready).toBe(false);
+    expect(target.textContent).toBe('');
+
+    runtime.loadRuntime();
+    await runtime.initialization;
+
+    expect(ready).toBe(true);
+    expect(target.textContent).toBe('Título pendente');
+    expect(runtime.context.__updatePreview)
+      .toBe(runtime.context.PreviewRuntime.update);
+  });
+
+  test.each([
+    ['carregamento', runtime => runtime.failRuntimeLoad()],
+    ['inicialização', runtime => runtime.failRuntimeInitialization()],
+    ['contrato da API', runtime => runtime.failRuntimeInvalidApi()]
+  ])('rejeita readiness quando falha %s do módulo', async (_, failRuntime) => {
+    const runtime = await createBindingRuntimeHarness({});
+    runtime.runBootstrap();
+    const rejection = expect(runtime.initialization)
+      .rejects.toThrow('Falha ao inicializar o runtime do preview');
+
+    failRuntime(runtime);
+
+    await rejection;
+    expect(runtime.parentHarness.state()).toMatchObject({
+      currentManifestData: null,
+      previewInitializedTemplate: null
+    });
+  });
+
+  test('expõe API explícita e mantém __updatePreview como contrato do iframe', async () => {
+    const runtime = await createReadyBindingRuntimeHarness({});
+
+    expect(runtime.context.PreviewRuntime).toEqual(expect.objectContaining({
+      initialize: expect.any(Function),
+      update: expect.any(Function),
+      applyScale: expect.any(Function),
+      handleResize: expect.any(Function)
+    }));
+    expect(runtime.context.__updatePreview)
+      .toBe(runtime.context.PreviewRuntime.update);
+  });
+
+  test('aplica em ordem atualizações recebidas enquanto o módulo está carregando', async () => {
+    const textTarget = new BindingElement();
+    const classTarget = new BindingElement();
+
+    await createReadyBindingRuntimeHarness({
+      bindings: [
+        { selector: '#title', field: 'title' }
+      ],
+      classes: [
+        { selector: '#card', field: 'className' }
+      ]
+    }, {
+      '#title': [textTarget],
+      '#card': [classTarget]
+    }, {
+      pendingUpdatesBeforeRuntime: [
+        { title: 'Primeira', className: 'first' },
+        { title: 'Segunda', className: 'second' }
+      ]
+    });
+
+    expect(textTarget.textContent).toBe('Segunda');
+    expect(classTarget.classList.contains('first')).toBe(true);
+    expect(classTarget.classList.contains('second')).toBe(true);
+  });
+
   test('aplica texto, HTML e imagem, incluindo campo aninhado e múltiplos alvos', async () => {
     const textTargets = [new BindingElement(), new BindingElement()];
     const htmlTarget = new BindingElement();
     const imageTarget = new BindingElement('img');
-    const runtime = await createBindingRuntimeHarness({
+    const runtime = await createReadyBindingRuntimeHarness({
       bindings: [
         { selector: '.title', type: 'text', field: 'article.title' },
         { selector: '#summary', type: 'html', field: 'summary' },
@@ -305,7 +468,7 @@ describe('runtime de bindings construído em public/script.js', () => {
     const inlineTarget = new BindingElement();
     const imageTarget = new BindingElement('img');
     const backgroundTarget = new BindingElement();
-    const runtime = await createBindingRuntimeHarness({
+    const runtime = await createReadyBindingRuntimeHarness({
       bindings: [
         { selector: '#inline-logo', type: 'logo', field: 'inlineLogo' },
         { selector: '#image-logo', type: 'logo', field: 'imageLogo' },
@@ -338,7 +501,7 @@ describe('runtime de bindings construído em public/script.js', () => {
     const classTarget = new BindingElement();
     const attributeTarget = new BindingElement();
     const fixedTarget = new BindingElement();
-    const runtime = await createBindingRuntimeHarness({
+    const runtime = await createReadyBindingRuntimeHarness({
       bindings: [
         {
           selector: '#fixed',
@@ -384,7 +547,7 @@ describe('runtime de bindings construído em public/script.js', () => {
   test('ignora campo ausente e selector sem alvos', async () => {
     const existingTarget = new BindingElement();
     existingTarget.textContent = 'Texto anterior';
-    const runtime = await createBindingRuntimeHarness({
+    const runtime = await createReadyBindingRuntimeHarness({
       bindings: [
         { selector: '#existing', field: 'missing' },
         { selector: '#not-found', value: 'Sem alvo' }
@@ -399,7 +562,7 @@ describe('runtime de bindings construído em public/script.js', () => {
   });
 
   test('aceita manifest sem arrays opcionais', async () => {
-    const runtime = await createBindingRuntimeHarness({});
+    const runtime = await createReadyBindingRuntimeHarness({});
 
     expect(() => runtime.update({ title: 'Sem bindings' })).not.toThrow();
     expect(runtime.context.console.error).not.toHaveBeenCalled();
@@ -408,7 +571,7 @@ describe('runtime de bindings construído em public/script.js', () => {
   test('executa atualização mais de uma vez sobre os mesmos alvos', async () => {
     const textTarget = new BindingElement();
     const classTarget = new BindingElement();
-    const runtime = await createBindingRuntimeHarness({
+    const runtime = await createReadyBindingRuntimeHarness({
       bindings: [
         { selector: '#title', field: 'title' }
       ],
@@ -426,6 +589,65 @@ describe('runtime de bindings construído em public/script.js', () => {
     expect(textTarget.textContent).toBe('Segundo');
     expect(classTarget.classList.contains('first')).toBe(true);
     expect(classTarget.classList.contains('second')).toBe(true);
+  });
+
+  test('registra resize e reaplica a escala com as dimensões do manifest', async () => {
+    const runtime = await createReadyBindingRuntimeHarness({
+      dimensions: {
+        width: 540,
+        height: 960
+      }
+    });
+    const resizeListener = runtime.context.addEventListener.mock.calls
+      .find(([eventName]) => eventName === 'resize')[1];
+
+    expect(resizeListener).toBe(runtime.context.PreviewRuntime.handleResize);
+    expect(runtime.context.addEventListener)
+      .toHaveBeenCalledWith('load', runtime.context.PreviewRuntime.applyScale);
+
+    runtime.context.innerWidth = 540;
+    runtime.context.innerHeight = 960;
+    runtime.context.PreviewRuntime.applyScale();
+    expect(runtime.documentElement.style.transform).toBe('scale(1)');
+
+    runtime.context.innerWidth = 270;
+    runtime.context.innerHeight = 960;
+    resizeListener();
+
+    expect(runtime.documentElement.style.transform).toBe('scale(0.5)');
+    expect(runtime.documentElement.style.transformOrigin).toBe('top left');
+    expect(runtime.documentElement.style.width).toBe('540px');
+    expect(runtime.documentElement.style.height).toBe('960px');
+  });
+
+  test('não registra listeners duplicados ao inicializar novamente', async () => {
+    const runtime = await createReadyBindingRuntimeHarness({});
+    const listenerCalls = runtime.context.addEventListener.mock.calls.length;
+
+    runtime.context.PreviewRuntime.initialize({});
+
+    expect(runtime.context.addEventListener).toHaveBeenCalledTimes(listenerCalls);
+  });
+
+  test('reutiliza preview pronto sem reinjetar documento ou listeners', async () => {
+    const target = new BindingElement();
+    const runtime = await createReadyBindingRuntimeHarness({
+      bindings: [
+        { selector: '#title', field: 'title' }
+      ]
+    }, {
+      '#title': [target]
+    });
+    const writeCalls = runtime.parentHarness.frameDocument.write.mock.calls.length;
+    const listenerCalls = runtime.context.addEventListener.mock.calls.length;
+
+    const reused = await runtime.parentHarness.run('ensurePreviewInitialized()');
+    runtime.update({ title: 'Preview reutilizado' });
+
+    expect(reused.manifest.bindings).toHaveLength(1);
+    expect(runtime.parentHarness.frameDocument.write).toHaveBeenCalledTimes(writeCalls);
+    expect(runtime.context.addEventListener).toHaveBeenCalledTimes(listenerCalls);
+    expect(target.textContent).toBe('Preview reutilizado');
   });
 });
 
@@ -1533,6 +1755,161 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });
+
+  test('aguarda readiness e aplica o payload antes de iniciar a exportação', async () => {
+    const harness = createHarness();
+    const readiness = createDeferred();
+    const readinessStarted = createDeferred();
+    const events = [];
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    harness.context.waitForRuntime = jest.fn(async ({ manifestData }) => {
+      readinessStarted.resolve();
+      await readiness.promise;
+      events.push('runtime-ready');
+      return manifestData;
+    });
+    harness.run('ensurePreviewInitialized = waitForRuntime');
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
+      events.push('payload-applied');
+    });
+    harness.context.PreviewExport.downloadPreview.mockImplementation(() => {
+      events.push('download-started');
+    });
+
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    await readinessStarted.promise;
+
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+
+    readiness.resolve();
+    await generation;
+
+    expect(events).toEqual([
+      'runtime-ready',
+      'payload-applied',
+      'download-started'
+    ]);
+  });
+
+  test.each(['carregamento', 'inicialização'])(
+    'restaura a interface quando falha a readiness de %s do runtime',
+    async () => {
+      const harness = createHarness({ autoResolveRuntime: false });
+      const documentWritten = createDeferred();
+      harness.run(`openModal('layout-hz')`);
+      harness.elements.newsUrl.value = 'https://example.com/noticia';
+      harness.extractNewsData.mockResolvedValue({
+        chapeu: 'Categoria',
+        bg: 'data:image/png;base64,QQ=='
+      });
+      harness.frameDocument.write.mockImplementation(html => {
+        if (html.includes('preview-runtime.js')) documentWritten.resolve();
+      });
+
+      const generation = harness.run('generateArtWithPreviewFlow()');
+      await documentWritten.promise;
+      harness.elements.previewFrame.contentWindow.__rejectPreviewRuntimeReady(
+        new Error('Falha ao inicializar o runtime do preview')
+      );
+      await generation;
+
+      expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+      expectNoSuccessToast(harness);
+      expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+        .toContain('Falha ao inicializar o runtime do preview');
+      expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+      expect(harness.elements.generateBtn.disabled).toBe(false);
+      expect(harness.state()).toMatchObject({
+        currentManifestData: null,
+        previewInitializedTemplate: null
+      });
+    }
+  );
+
+  test('refaz a inicialização e exporta depois de uma falha do runtime', async () => {
+    const harness = createHarness({ autoResolveRuntime: false });
+    const firstDocument = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    harness.frameDocument.write.mockImplementation(html => {
+      if (html.includes('preview-runtime.js')) firstDocument.resolve();
+    });
+
+    const firstGeneration = harness.run('generateArtWithPreviewFlow()');
+    await firstDocument.promise;
+    harness.elements.previewFrame.contentWindow.__rejectPreviewRuntimeReady(
+      new Error('Falha ao inicializar o runtime do preview')
+    );
+    await firstGeneration;
+
+    const secondDocument = createDeferred();
+    harness.frameDocument.write.mockImplementation(html => {
+      if (html.includes('preview-runtime.js')) secondDocument.resolve();
+    });
+    const secondGeneration = harness.run('generateArtWithPreviewFlow()');
+    await secondDocument.promise;
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__resolvePreviewRuntimeReady();
+    await secondGeneration;
+
+    const runtimeDocuments = harness.frameDocument.write.mock.calls
+      .filter(([html]) => html.includes('preview-runtime.js'));
+    expect(runtimeDocuments).toHaveLength(2);
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview)
+      .toHaveBeenCalled();
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test.each(['resolvida', 'rejeitada'])(
+    'ignora readiness %s depois de a geração se tornar obsoleta',
+    async readinessOutcome => {
+      const harness = createHarness({ autoResolveRuntime: false });
+      const documentWritten = createDeferred();
+      harness.run(`openModal('layout-hz')`);
+      harness.elements.newsUrl.value = 'https://example.com/noticia';
+      harness.extractNewsData.mockResolvedValue({
+        chapeu: 'Categoria',
+        bg: 'data:image/png;base64,QQ=='
+      });
+      harness.frameDocument.write.mockImplementation(html => {
+        if (html.includes('preview-runtime.js')) documentWritten.resolve();
+      });
+
+      const generation = harness.run('generateArtWithPreviewFlow()');
+      await documentWritten.promise;
+      const oldFrameWindow = harness.elements.previewFrame.contentWindow;
+      const settleOldRuntime = readinessOutcome === 'resolvida'
+        ? () => oldFrameWindow.__resolvePreviewRuntimeReady()
+        : () => oldFrameWindow.__rejectPreviewRuntimeReady(
+          new Error('Falha ao inicializar o runtime do preview')
+        );
+
+      harness.run(`openModal('rede-gazeta')`);
+      settleOldRuntime();
+      await generation;
+
+      expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+      expect(harness.elements.toastContainer.children).toHaveLength(0);
+      expect(harness.state()).toMatchObject({
+        currentTemplate: 'rede-gazeta',
+        currentManifestData: null,
+        previewInitializedTemplate: null
+      });
+      expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+      expect(harness.elements.generateBtn.disabled).toBe(false);
+    }
+  );
 
   test.each([
     {

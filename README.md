@@ -141,6 +141,7 @@ public/
     api.js
     frontend-utils.js
     preview-export.js
+    preview-runtime.js
   vendor/
     html-to-image.js
 

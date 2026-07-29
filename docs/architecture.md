@@ -60,7 +60,8 @@ template em disco ──> backend ────+──> frontend
 │   ├── js/
 │   │   ├── api.js                 # cliente HTTP e cache de templates
 │   │   ├── frontend-utils.js      # validações e transformações puras
-│   │   └── preview-export.js      # captura e download do PNG
+│   │   ├── preview-export.js      # captura e download do PNG
+│   │   └── preview-runtime.js     # bindings e escala dentro do iframe
 │   ├── vendor/html-to-image.js    # biblioteca versionada de exportação
 │   └── previews/                  # miniaturas usadas pelo catálogo
 ├── templates/
@@ -199,8 +200,14 @@ montagem pura do payload da arte. As funções não acessam o DOM e também são
 exportadas para testes unitários.
 
 `public/script.js` mantém o catálogo visível, o estado global da tela e a
-orquestração dos fluxos. Ele também gera como string o runtime de bindings
-executado no `iframe`.
+orquestração dos fluxos. Ele monta o documento do `iframe`, carrega o módulo
+estático de runtime e inicializa esse módulo com o manifest da página.
+
+`public/js/preview-runtime.js` expõe `window.PreviewRuntime` dentro do iframe.
+Sua API permite inicializar o manifest, atualizar bindings, aplicar escala e
+tratar resize. A inicialização mantém `window.__updatePreview` como ponto de
+entrada usado pela página principal e não registra os listeners novamente
+quando chamada mais de uma vez na mesma instância.
 
 `readGenerationFormData` concentra a leitura dos cinco campos do formulário e
 dos estados atuais de tema e template em um snapshot normalizado, sem alterar
@@ -390,13 +397,15 @@ atual. Quando inicializa:
 
 1. carrega HTML, CSS, manifest e logo;
 2. concatena o CSS;
-3. serializa o manifest dentro de um script;
+3. serializa o manifest para a chamada de inicialização;
 4. monta um documento HTML completo;
 5. define `<base href="/templates/<template>/<page>/">`;
 6. inclui o fragmento HTML do template;
 7. carrega `/vendor/html-to-image.js`;
-8. inclui o runtime de bindings;
-9. grava tudo com `frameDoc.open/write/close`.
+8. instala um bootstrap mínimo com fila e uma Promise de readiness;
+9. carrega `/js/preview-runtime.js` com tratamento explícito de `load` e
+   `error`, valida sua API e o inicializa com o manifest;
+10. grava tudo com `frameDoc.open/write/close`.
 
 O `iframe` não usa atributo `sandbox`. Como o documento é escrito pelo pai e
 permanece na mesma origem, o frontend acessa diretamente `contentDocument` e
@@ -406,14 +415,25 @@ Há duas escalas:
 
 - `resizePreviewFrame` aplica um `transform` ao próprio `iframe`, calculado pela
   largura do wrapper e por uma largura fixa de 1080;
-- `applyPreviewScale`, dentro do iframe, escala o elemento `html` de acordo com
+- `PreviewRuntime.applyScale`, dentro do iframe, escala o elemento `html` de acordo com
   as dimensões do manifest e o viewport interno.
 
-O runtime publica `window.__updatePreview`. Tanto `updatePreview` quanto a
-geração montam o payload por `buildPreviewData` e o entregam a
-`applyArtworkDataToPreview`, que chama a função do iframe, muta o DOM do
-template e reaplica a escala. O placeholder é ocultado assim que o documento é
-inicializado.
+O runtime publica `window.__updatePreview`. Enquanto o módulo está carregando,
+o bootstrap enfileira as atualizações e as aplica em ordem após a
+inicialização. A Promise `window.__previewRuntimeReady` só resolve depois da
+carga, validação, inicialização e drenagem dessa fila. Falha de carga, API
+inválida ou exceção da inicialização rejeita a Promise com uma mensagem estável
+e retorna ao tratamento de erro da página principal.
+
+`ensurePreviewInitialized` aguarda essa readiness e somente então publica
+`currentManifestData`, `previewInitializedTemplate` e
+`previewInitializedPage`. Template e página formam a chave de reutilização; uma
+falha não deixa o iframe reutilizável e uma chamada posterior reinicia o
+processo. Tanto `updatePreview` quanto a geração montam o payload por
+`buildPreviewData` e o entregam a `applyArtworkDataToPreview`. Na geração, o
+runtime pronto precede a aplicação síncrona do payload final, que precede
+`downloadPreview`; preview e PNG observam o mesmo DOM. O placeholder é ocultado
+somente depois da readiness.
 
 ## Bindings do manifest
 

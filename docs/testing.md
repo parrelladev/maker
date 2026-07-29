@@ -312,11 +312,16 @@ incorporação de uma imagem manual HTTP cujo backend retorna uma data URL JPEG
 validada. Nesses fluxos, preview e exportação recebem a mesma imagem e loading e
 botão são restaurados.
 
-A suíte também executa o runtime de bindings construído por `public/script.js`
-e escrito no iframe. Os testes caracterizam texto, HTML, imagem, as três formas
-de logo, variáveis CSS, classes, atributos, campos aninhados, valores fixos,
-valores e alvos ausentes, múltiplos alvos, arrays opcionais ausentes e
-atualizações repetidas.
+A suíte também executa o módulo estático `public/js/preview-runtime.js` pelo
+mesmo bootstrap escrito no iframe. Os testes caracterizam sua API explícita,
+readiness atrasada, drenagem ordenada da fila, falha de carregamento, falha de
+inicialização, nova tentativa, reutilização sem reinjeção ou listeners
+duplicados, escala e resize. A geração confirma a ordem entre runtime pronto,
+payload aplicado e início da exportação, além do descarte silencioso quando a
+readiness pertence a uma geração obsoleta. Os demais casos caracterizam texto,
+HTML, imagem, as três formas de logo, variáveis CSS, classes, atributos, campos
+aninhados, valores fixos, valores e alvos ausentes, múltiplos alvos, arrays
+opcionais ausentes e atualizações repetidas.
 
 ## Módulos e comportamentos cobertos
 
@@ -336,6 +341,7 @@ atualizações repetidas.
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
 | `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado e imutável na geração, transições do estado global, descarte por URL, template, sessão e geração, concorrência fora de ordem, falhas assíncronas, validações da orquestração, matriz de precedência, payload canônico no preview/exportação e restauração do loading e botão |
+| `public/js/preview-runtime.js` | `PreviewRuntime`, `__previewRuntimeReady` e `__updatePreview` | readiness, carga e inicialização, falhas, retry, fila, API explícita, bindings, escala, resize e listeners idempotentes |
 | `public/js/frontend-utils.js` | `createArtworkData`, `validateGenerationInput` e transformações auxiliares | payload completo da arte, precedência e fallbacks sem DOM ou globals; validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa

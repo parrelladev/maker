@@ -111,6 +111,7 @@ let lastNewsUrl = null;
 let currentManifestData = null;
 let previewInitializedTemplate = null;
 let previewInitializedPage = null;
+let previewInitializationVersion = 0;
 let modalSessionVersion = 0;
 let latestGenerationId = 0;
 let resolvedImageFieldState = {
@@ -437,6 +438,7 @@ function openModal(templateKey) {
   currentManifestData = null;
   previewInitializedTemplate = null;
   previewInitializedPage = null;
+  previewInitializationVersion += 1;
   clearResolvedImageFieldState();
 
   if (templateData && Array.isArray(templateData.themes) && templateData.themes.length) {
@@ -499,6 +501,7 @@ function closeModalHandler() {
   currentManifestData = null;
   previewInitializedTemplate = null;
   previewInitializedPage = null;
+  previewInitializationVersion += 1;
   clearResolvedImageFieldState();
 
   if (customTheme) {
@@ -612,14 +615,13 @@ async function ensurePreviewInitialized({
 
   const manifestData = providedManifestData || await loadManifest(template, page);
   if (assertCurrent) assertCurrent();
-  currentManifestData = manifestData;
-  previewInitializedTemplate = template;
-  previewInitializedPage = page;
 
-  const frameDoc = previewFrame.contentDocument || previewFrame.contentWindow.document;
-  if (!frameDoc) {
-    return manifestData;
+  const frameWindow = previewFrame.contentWindow;
+  const frameDoc = previewFrame.contentDocument || frameWindow?.document;
+  if (!frameWindow || !frameDoc) {
+    throw new Error('Falha ao inicializar o runtime do preview');
   }
+  const initializationVersion = ++previewInitializationVersion;
 
   const cssContent = Array.isArray(manifestData.css)
     ? manifestData.css.map(file => file.content || '').join('\n')
@@ -627,162 +629,50 @@ async function ensurePreviewInitialized({
 
   const manifestJson = JSON.stringify(manifestData.manifest || {});
 
-  // Runtime de binding usado pelo preview e pela exportação client-side.
-  const bindingScript = `
+  const runtimeBootstrap = `
     (function () {
-      var manifest = ${manifestJson};
-
-      // Mantém o canvas do template proporcional dentro da janela do iframe
-      var designWidth = (manifest && manifest.dimensions && manifest.dimensions.width) || 1080;
-      var designHeight = (manifest && manifest.dimensions && manifest.dimensions.height) || 1920;
-
-      function applyPreviewScale() {
-        try {
-          var vw = window.innerWidth || document.documentElement.clientWidth;
-          var vh = window.innerHeight || document.documentElement.clientHeight;
-          if (!vw || !vh) return;
-
-          var scaleX = vw / designWidth;
-          var scaleY = vh / designHeight;
-          var scale = Math.min(scaleX, scaleY);
-
-          var root = document.documentElement;
-          var body = document.body;
-
-          root.style.transformOrigin = 'top left';
-          root.style.transform = 'scale(' + scale + ')';
-          root.style.width = designWidth + 'px';
-          root.style.height = designHeight + 'px';
-
-          if (body) {
-            body.style.margin = '0';
-            body.style.padding = '0';
-            body.style.overflow = 'hidden';
-            body.style.display = 'flex';
-            body.style.alignItems = 'stretch';
-            body.style.justifyContent = 'center';
-            body.style.backgroundColor = '#000';
-          }
-        } catch (e) {
-          console.error('Erro ao aplicar escala de preview:', e);
-        }
-      }
-
-      window.addEventListener('resize', applyPreviewScale);
-      window.addEventListener('load', applyPreviewScale);
-      setTimeout(applyPreviewScale, 0);
-
-      function toClassList(value) {
-        if (Array.isArray(value)) return value.filter(Boolean);
-        if (typeof value === 'string') return value.split(/\\s+/).filter(Boolean);
-        if (value === undefined || value === null) return [];
-        return [String(value)];
-      }
-
-      function getValue(data, field, fallback) {
-        if (!field) return fallback;
-        var parts = field.split('.');
-        var acc = data;
-        for (var i = 0; i < parts.length; i++) {
-          if (acc && typeof acc === 'object' && Object.prototype.hasOwnProperty.call(acc, parts[i])) {
-            acc = acc[parts[i]];
-          } else {
-            return fallback;
-          }
-        }
-        return acc;
-      }
-
-      function applyBindings(manifest, data) {
-        data = data || {};
-        var bindings = Array.isArray(manifest.bindings) ? manifest.bindings : [];
-        var cssVars = Array.isArray(manifest.cssVars) ? manifest.cssVars : [];
-        var classes = Array.isArray(manifest.classes) ? manifest.classes : [];
-        var attributes = Array.isArray(manifest.attributes) ? manifest.attributes : [];
-
-        bindings.forEach(function (binding) {
-          if (!binding || !binding.selector) return;
-          var value = Object.prototype.hasOwnProperty.call(binding, 'value')
-            ? binding.value
-            : getValue(data, binding.field);
-          if (value === undefined || value === null) return;
-
-          var targets = Array.prototype.slice.call(document.querySelectorAll(binding.selector));
-          if (!targets.length) return;
-
-          targets.forEach(function (el) {
-            var type = binding.type || 'text';
-            if (type === 'html') {
-              el.innerHTML = String(value);
-            } else if (type === 'image') {
-              el.src = String(value);
-            } else if (type === 'logo') {
-              if (value && value.kind === 'inline-svg' && value.markup) {
-                el.innerHTML = value.markup;
-              } else if (value && value.src) {
-                if (el.tagName && el.tagName.toLowerCase() === 'img') {
-                  el.src = value.src;
-                } else {
-                  el.style.backgroundImage = 'url(' + value.src + ')';
-                }
-              }
-            } else {
-              el.textContent = String(value);
-            }
-          });
-        });
-
-        cssVars.forEach(function (entry) {
-          if (!entry || !entry.name) return;
-          var selector = entry.selector || ':root';
-          var value = Object.prototype.hasOwnProperty.call(entry, 'value')
-            ? entry.value
-            : getValue(data, entry.field);
-          if (value === undefined || value === null) return;
-          var targets = selector === ':root'
-            ? [document.documentElement]
-            : Array.prototype.slice.call(document.querySelectorAll(selector));
-          targets.forEach(function (el) {
-            el.style.setProperty(entry.name, String(value));
-          });
-        });
-
-        classes.forEach(function (entry) {
-          if (!entry || !entry.selector) return;
-          var value = Object.prototype.hasOwnProperty.call(entry, 'value')
-            ? entry.value
-            : getValue(data, entry.field);
-          if (value === undefined || value === null) return;
-          var targetList = Array.prototype.slice.call(document.querySelectorAll(entry.selector));
-          var classList = toClassList(value);
-          targetList.forEach(function (el) {
-            classList.forEach(function (cls) {
-              el.classList.add(cls);
-            });
-          });
-        });
-
-        attributes.forEach(function (entry) {
-          if (!entry || !entry.selector || !entry.name) return;
-          var value = Object.prototype.hasOwnProperty.call(entry, 'value')
-            ? entry.value
-            : getValue(data, entry.field);
-          if (value === undefined || value === null) return;
-          var targetList = Array.prototype.slice.call(document.querySelectorAll(entry.selector));
-          targetList.forEach(function (el) {
-            el.setAttribute(entry.name, String(value));
-          });
-        });
-      }
+      var pendingUpdates = [];
+      var resolveReady = window.__resolvePreviewRuntimeReady;
+      var rejectReady = window.__rejectPreviewRuntimeReady;
 
       window.__updatePreview = function (data) {
-        try {
-          applyBindings(manifest, data || {});
-          applyPreviewScale();
-        } catch (err) {
-          console.error('Erro ao aplicar bindings no preview:', err);
-        }
+        pendingUpdates.push(data);
       };
+
+      function rejectRuntime() {
+        rejectReady(new Error('Falha ao inicializar o runtime do preview'));
+      }
+
+      function initializeRuntime() {
+        try {
+          var runtime = window.PreviewRuntime;
+          if (
+            !runtime
+            || typeof runtime.initialize !== 'function'
+            || typeof runtime.update !== 'function'
+            || typeof runtime.applyScale !== 'function'
+            || typeof runtime.handleResize !== 'function'
+          ) {
+            rejectRuntime();
+            return;
+          }
+
+          runtime.initialize(${manifestJson});
+          pendingUpdates.forEach(function (data) {
+            runtime.update(data);
+          });
+          pendingUpdates = [];
+          resolveReady();
+        } catch (error) {
+          rejectRuntime();
+        }
+      }
+
+      var runtimeScript = document.createElement('script');
+      runtimeScript.src = '/js/preview-runtime.js';
+      runtimeScript.addEventListener('load', initializeRuntime, { once: true });
+      runtimeScript.addEventListener('error', rejectRuntime, { once: true });
+      document.head.appendChild(runtimeScript);
     })();
   `;
 
@@ -804,19 +694,53 @@ async function ensurePreviewInitialized({
     <body>
       ${manifestData.html}
       <script src="/vendor/html-to-image.js"><\/script>
-      <script>${bindingScript}<\/script>
+      <script>${runtimeBootstrap}<\/script>
     </body>
   </html>`;
 
+  let resolveRuntimeReady;
+  let rejectRuntimeReady;
+  const runtimeReady = new Promise((resolve, reject) => {
+    resolveRuntimeReady = resolve;
+    rejectRuntimeReady = reject;
+  });
+
   frameDoc.open();
+  frameWindow.__previewRuntimeReady = runtimeReady;
+  frameWindow.__resolvePreviewRuntimeReady = resolveRuntimeReady;
+  frameWindow.__rejectPreviewRuntimeReady = rejectRuntimeReady;
   frameDoc.write(iframeHtml);
   frameDoc.close();
 
-  if (previewPlaceholder) {
-    previewPlaceholder.style.display = 'none';
-  }
+  try {
+    await runtimeReady;
+    if (assertCurrent) assertCurrent();
+    if (initializationVersion !== previewInitializationVersion) {
+      return null;
+    }
 
-  return manifestData;
+    currentManifestData = manifestData;
+    previewInitializedTemplate = template;
+    previewInitializedPage = page;
+
+    if (previewPlaceholder) {
+      previewPlaceholder.style.display = 'none';
+    }
+
+    return manifestData;
+  } catch (error) {
+    if (initializationVersion === previewInitializationVersion) {
+      currentManifestData = null;
+      previewInitializedTemplate = null;
+      previewInitializedPage = null;
+    }
+    throw new Error('Falha ao inicializar o runtime do preview');
+  } finally {
+    if (frameWindow.__resolvePreviewRuntimeReady === resolveRuntimeReady) {
+      delete frameWindow.__resolvePreviewRuntimeReady;
+      delete frameWindow.__rejectPreviewRuntimeReady;
+    }
+  }
 }
 
 function buildPreviewData(
@@ -884,8 +808,6 @@ async function generateArtWithPreviewFlow() {
       generationContext.page
     );
     assertCurrent();
-    currentManifestData = manifestData;
-
     const extractedData = await getOrExtractNewsData(
       generationContext.url,
       assertCurrent
