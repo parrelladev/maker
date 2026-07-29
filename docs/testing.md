@@ -312,6 +312,12 @@ incorporação de uma imagem manual HTTP cujo backend retorna uma data URL JPEG
 validada. Nesses fluxos, preview e exportação recebem a mesma imagem e loading e
 botão são restaurados.
 
+A suíte também executa o runtime de bindings construído por `public/script.js`
+e escrito no iframe. Os testes caracterizam texto, HTML, imagem, as três formas
+de logo, variáveis CSS, classes, atributos, campos aninhados, valores fixos,
+valores e alvos ausentes, múltiplos alvos, arrays opcionais ausentes e
+atualizações repetidas.
+
 ## Módulos e comportamentos cobertos
 
 ### Cobertura direta demonstrada
@@ -369,8 +375,6 @@ de cobertura.
 - cliente das APIs;
 - construção do documento do iframe;
 - escala do preview;
-- bindings de texto, HTML, imagem e logo;
-- variáveis CSS, classes e atributos;
 - confiança em manifest e template;
 - espera de fontes e imagens;
 - bloqueio de imagens não exportáveis;

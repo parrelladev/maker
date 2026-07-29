@@ -79,6 +79,22 @@ class FakeElement {
   }
 }
 
+class BindingElement extends FakeElement {
+  constructor(tagName = 'div') {
+    super();
+    this.tagName = tagName.toUpperCase();
+    this.attributes = {};
+    this.src = '';
+    this.style.setProperty = (name, value) => {
+      this.style[name] = value;
+    };
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = value;
+  }
+}
+
 function createHarness() {
   jest.useFakeTimers();
 
@@ -196,6 +212,222 @@ function createHarness() {
     state
   };
 }
+
+async function createBindingRuntimeHarness(manifest, targetsBySelector = {}) {
+  const parentHarness = createHarness();
+  parentHarness.loadManifest.mockResolvedValue({
+    template: 'binding-fixture',
+    page: 'index',
+    manifest,
+    css: [],
+    html: ''
+  });
+
+  await parentHarness.run(`
+    currentTemplate = 'binding-fixture';
+    ensurePreviewInitialized();
+  `);
+
+  const iframeHtml = parentHarness.frameDocument.write.mock.calls[0][0];
+  const runtimeMatch = iframeHtml.match(
+    /<script>\s*(\(function \(\) \{[\s\S]*\}\)\(\);)\s*<\/script>/
+  );
+  if (!runtimeMatch) {
+    throw new Error('Runtime de bindings não encontrado no documento do iframe');
+  }
+
+  const documentElement = new BindingElement('html');
+  documentElement.clientWidth = 1080;
+  const body = new BindingElement('body');
+  const context = {
+    console: {
+      ...console,
+      error: jest.fn()
+    },
+    document: {
+      body,
+      documentElement,
+      querySelectorAll(selector) {
+        return targetsBySelector[selector] || [];
+      }
+    },
+    innerHeight: 1920,
+    innerWidth: 1080,
+    setTimeout,
+    clearTimeout,
+    addEventListener: jest.fn()
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(runtimeMatch[1], context, {
+    filename: 'iframe-binding-runtime.js'
+  });
+
+  return {
+    context,
+    documentElement,
+    update(data) {
+      context.__updatePreview(data);
+    }
+  };
+}
+
+describe('runtime de bindings construído em public/script.js', () => {
+  test('aplica texto, HTML e imagem, incluindo campo aninhado e múltiplos alvos', async () => {
+    const textTargets = [new BindingElement(), new BindingElement()];
+    const htmlTarget = new BindingElement();
+    const imageTarget = new BindingElement('img');
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        { selector: '.title', type: 'text', field: 'article.title' },
+        { selector: '#summary', type: 'html', field: 'summary' },
+        { selector: '#photo', type: 'image', field: 'image' }
+      ]
+    }, {
+      '.title': textTargets,
+      '#summary': [htmlTarget],
+      '#photo': [imageTarget]
+    });
+
+    runtime.update({
+      article: { title: 'Título aninhado' },
+      summary: '<strong>Resumo</strong>',
+      image: 'https://example.com/photo.jpg'
+    });
+
+    expect(textTargets.map(element => element.textContent))
+      .toEqual(['Título aninhado', 'Título aninhado']);
+    expect(htmlTarget.innerHTML).toBe('<strong>Resumo</strong>');
+    expect(imageTarget.src).toBe('https://example.com/photo.jpg');
+  });
+
+  test('aplica logo como SVG inline, src de img e background', async () => {
+    const inlineTarget = new BindingElement();
+    const imageTarget = new BindingElement('img');
+    const backgroundTarget = new BindingElement();
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        { selector: '#inline-logo', type: 'logo', field: 'inlineLogo' },
+        { selector: '#image-logo', type: 'logo', field: 'imageLogo' },
+        { selector: '#background-logo', type: 'logo', field: 'backgroundLogo' }
+      ]
+    }, {
+      '#inline-logo': [inlineTarget],
+      '#image-logo': [imageTarget],
+      '#background-logo': [backgroundTarget]
+    });
+
+    runtime.update({
+      inlineLogo: {
+        kind: 'inline-svg',
+        markup: '<svg viewBox="0 0 1 1"><path /></svg>'
+      },
+      imageLogo: { src: '/input/image-logo.png' },
+      backgroundLogo: { src: '/input/background-logo.png' }
+    });
+
+    expect(inlineTarget.innerHTML)
+      .toBe('<svg viewBox="0 0 1 1"><path /></svg>');
+    expect(imageTarget.src).toBe('/input/image-logo.png');
+    expect(backgroundTarget.style.backgroundImage)
+      .toBe('url(/input/background-logo.png)');
+  });
+
+  test('aplica variável CSS, classes, atributos e valor fixo do manifest', async () => {
+    const cssTarget = new BindingElement();
+    const classTarget = new BindingElement();
+    const attributeTarget = new BindingElement();
+    const fixedTarget = new BindingElement();
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        {
+          selector: '#fixed',
+          type: 'text',
+          field: 'ignored',
+          value: 'Valor fixo'
+        }
+      ],
+      cssVars: [
+        { selector: '#card', name: '--accent', field: 'theme.accent' },
+        { name: '--root-gap', value: 12 }
+      ],
+      classes: [
+        { selector: '#card-class', field: 'theme.classes' }
+      ],
+      attributes: [
+        { selector: '#link', name: 'aria-label', field: 'label' }
+      ]
+    }, {
+      '#card': [cssTarget],
+      '#card-class': [classTarget],
+      '#link': [attributeTarget],
+      '#fixed': [fixedTarget]
+    });
+
+    runtime.update({
+      ignored: 'Valor dos dados',
+      theme: {
+        accent: '#ff00aa',
+        classes: 'featured compact'
+      },
+      label: 'Abrir notícia'
+    });
+
+    expect(cssTarget.style['--accent']).toBe('#ff00aa');
+    expect(runtime.documentElement.style['--root-gap']).toBe('12');
+    expect(classTarget.classList.contains('featured')).toBe(true);
+    expect(classTarget.classList.contains('compact')).toBe(true);
+    expect(attributeTarget.attributes['aria-label']).toBe('Abrir notícia');
+    expect(fixedTarget.textContent).toBe('Valor fixo');
+  });
+
+  test('ignora campo ausente e selector sem alvos', async () => {
+    const existingTarget = new BindingElement();
+    existingTarget.textContent = 'Texto anterior';
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        { selector: '#existing', field: 'missing' },
+        { selector: '#not-found', value: 'Sem alvo' }
+      ]
+    }, {
+      '#existing': [existingTarget]
+    });
+
+    runtime.update({});
+    expect(runtime.context.console.error).not.toHaveBeenCalled();
+    expect(existingTarget.textContent).toBe('Texto anterior');
+  });
+
+  test('aceita manifest sem arrays opcionais', async () => {
+    const runtime = await createBindingRuntimeHarness({});
+
+    expect(() => runtime.update({ title: 'Sem bindings' })).not.toThrow();
+    expect(runtime.context.console.error).not.toHaveBeenCalled();
+  });
+
+  test('executa atualização mais de uma vez sobre os mesmos alvos', async () => {
+    const textTarget = new BindingElement();
+    const classTarget = new BindingElement();
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        { selector: '#title', field: 'title' }
+      ],
+      classes: [
+        { selector: '#card', field: 'className' }
+      ]
+    }, {
+      '#title': [textTarget],
+      '#card': [classTarget]
+    });
+
+    runtime.update({ title: 'Primeiro', className: 'first' });
+    runtime.update({ title: 'Segundo', className: 'second' });
+
+    expect(textTarget.textContent).toBe('Segundo');
+    expect(classTarget.classList.contains('first')).toBe(true);
+    expect(classTarget.classList.contains('second')).toBe(true);
+  });
+});
 
 describe('contrato de estado de public/script.js', () => {
   test('lê um snapshot normalizado dos dados atuais do formulário de geração', () => {
