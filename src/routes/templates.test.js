@@ -32,10 +32,13 @@ async function withTemplateServer(callback) {
 describe('rotas de templates com fixtures mínimas', () => {
   beforeEach(() => {
     process.chdir(fixtureWorkspace);
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
+    jest.restoreAllMocks();
     jest.resetModules();
   });
 
@@ -111,34 +114,59 @@ describe('rotas de templates com fixtures mínimas', () => {
   });
 
   test.each([
-    ['/api/templates/template-inexistente/index', 'Template não encontrado'],
-    ['/api/templates/fixture/pagina-inexistente', 'Página do template não encontrada'],
-  ])('retorna 404 para diretório inexistente em %s', async (route, detail) => {
+    '/api/templates/template-inexistente/index',
+    '/api/templates/fixture/pagina-inexistente',
+  ])('retorna 404 estável para diretório inexistente em %s', async (route) => {
     await withTemplateServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}${route}`);
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      expect(body.detail).toContain(detail);
+      expect(body).toEqual({
+        error: 'Template não encontrado',
+        code: 'TEMPLATE_NOT_FOUND',
+      });
+      expect(JSON.stringify(body)).not.toContain(fixtureWorkspace);
+      expect(console.error).toHaveBeenCalled();
     });
   });
 
   test.each([
-    ['missing-manifest', 'Manifesto não encontrado'],
-    ['invalid-manifest', null],
-    ['missing-html', 'index.html não encontrado'],
-  ])('retorna 404 para %s', async (page, detail) => {
+    'missing-manifest',
+    'missing-html',
+  ])('retorna 404 estável para %s', async (page) => {
     await withTemplateServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/templates/fixture/${page}`);
       const body = await response.json();
 
       expect(response.status).toBe(404);
-      if (detail) {
-        expect(body.detail).toContain(detail);
-      } else {
-        expect(body.detail).toEqual(expect.any(String));
-        expect(body.detail).not.toBe('');
-      }
+      expect(body).toEqual({
+        error: 'Template não encontrado',
+        code: 'TEMPLATE_NOT_FOUND',
+      });
+      expect(JSON.stringify(body)).not.toMatch(
+        /template-workspace|manifest\.json|index\.html|Unexpected token/i
+      );
+      expect(console.error).toHaveBeenCalled();
+    });
+  });
+
+  test('retorna 500 estável para manifest JSON inválido', async () => {
+    await withTemplateServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/templates/fixture/invalid-manifest`
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({
+        error: 'Template inválido',
+        code: 'TEMPLATE_INVALID',
+      });
+      expect(JSON.stringify(body)).not.toMatch(
+        /template-workspace|manifest\.json|Unexpected token|position \d+/i
+      );
+      expect(console.error).toHaveBeenCalled();
     });
   });
 });

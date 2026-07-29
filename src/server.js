@@ -1,5 +1,9 @@
 const express = require('express');
 const config = require('./appConfig');
+const {
+  getGlobalErrorResponse,
+  logRequestError,
+} = require('./lib/httpErrorResponse');
 
 const templatesRouter = require('./routes/templates');
 const newsRouter = require('./routes/news');
@@ -22,14 +26,20 @@ app.get('/', (req, res) => {
   });
 });
 
-app.use((err, req, res, next) => {
-  // eslint-disable-next-line no-console
-  console.error('[server] erro inesperado:', err);
-  res.status(500).json({
-    error: 'Erro interno do servidor',
-    detail: err.message,
+function globalErrorHandler(err, req, res, next) {
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  const response = getGlobalErrorResponse(err);
+  logRequestError('server', req, err, {
+    status: response.status,
+    code: response.body.code,
   });
-});
+  return res.status(response.status).json(response.body);
+}
+
+app.use(globalErrorHandler);
 
 if (require.main === module) {
   app.listen(config.port, () => {
@@ -39,3 +49,4 @@ if (require.main === module) {
 }
 
 module.exports = app;
+module.exports.globalErrorHandler = globalErrorHandler;

@@ -211,7 +211,7 @@ usa a rede do servidor.
 | --- | --- | ---: | ---: | ---: | --- |
 | `newsScraper.fetch` | corpo de `/extract` | 10 s | 5 MB | 3 | `text/html` ou `application/xhtml+xml` |
 | `routes/news.embedImage` | imagem extraída ou corpo de `/embed-image` | 15 s | 12 MB | 3 | PNG, JPEG, GIF ou WebP com assinatura básica |
-| `assetResolver.resolveLogoAsset` | `defaultLogo` do manifest | 10 s | 1 MB | 3 | exige `image/svg+xml` e procura `<svg` |
+| `assetResolver.resolveLogoAsset` | `defaultLogo` do manifest | 10 s | 1 MB | 3 | exige `image/svg+xml`, XML válido e allowlists |
 
 Os três fluxos usam `safeHttpClient`, que aplica a mesma validação de URL, DNS,
 endereços e redirects e retorna erros classificados. Os valores da tabela, o
@@ -318,15 +318,34 @@ a captura.
 
 1. identifica SVG remoto pela extensão presente na URL;
 2. baixa o texto remoto ou lê o arquivo local;
-3. verifica apenas se o texto contém `<svg`;
-4. guarda o resultado no `LOGO_CACHE`;
-5. envia o markup na resposta da rota de template;
-6. o binding `logo` atribui o markup a `el.innerHTML` dentro do iframe.
+3. aplica limite de 1 MB;
+4. faz parsing XML estrito com `saxes`;
+5. reconhece somente regras CSS locais com seletor de classe simples e
+   propriedades de apresentação permitidas;
+6. converte essas propriedades em atributos validados nos elementos;
+7. reconstrói o documento usando allowlists de elementos, atributos e valores,
+   sem conservar o elemento `style`;
+8. guarda o resultado sanitizado no `LOGO_CACHE`;
+9. envia o markup na resposta da rota de template;
+10. o binding `logo` atribui o markup a `el.innerHTML` dentro do iframe.
 
 Para SVG remoto:
 
-- **Defesa ausente:** sanitização de elementos, atributos, URLs e event
-  handlers.
+- **Defesa existente:** scripts, `foreignObject`, elementos não reconhecidos,
+  event handlers, estilos inline, CSS arbitrário e referências externas são
+  removidos.
+- **Defesa existente:** atributos de pintura e referência usam gramáticas
+  fechadas. Escapes e comentários CSS, protocolos explícitos ou ofuscados,
+  funções desconhecidas e valores ambíguos são descartados.
+- **Defesa existente:** `href` e atributos que aceitam referências conservam
+  somente fragmentos locais em sintaxe canônica, como `url(#identificador)`.
+- **Defesa existente:** o subconjunto CSS aceito contém apenas seletores de
+  classe simples e propriedades de apresentação com valores validados pela
+  mesma gramática dos atributos. Se uma regra sair desse subconjunto, todo o
+  conteúdo daquele elemento `style` é ignorado; nenhum CSS arbitrário é
+  preservado no resultado.
+- **Defesa existente:** XML malformado, `DOCTYPE`, raiz que não seja SVG e
+  conteúdo acima do limite são rejeitados antes do cache.
 - **Defesa existente:** timeout de 10 segundos, limite de 1 MB e máximo de três
   redirects.
 - **Defesa existente:** exige `image/svg+xml`, aceitando parâmetros como
@@ -335,15 +354,18 @@ Para SVG remoto:
   endereços e redirects.
 - **Risco dependente do ambiente:** exige que um manifest local confiado aponte
   para uma origem remota ou que o conteúdo dessa origem seja comprometido.
-- **Hipótese a testar — XSS:** verificar em navegadores suportados quais
-  elementos e event handlers de um SVG inserido por `innerHTML` permanecem
-  ativos e se conseguem executar no contexto de mesma origem do iframe.
-- **Hipótese a testar — requisições secundárias:** verificar quais referências
-  externas dentro do SVG são carregadas pelo navegador e por `html-to-image`.
+- **Hipótese a testar — XSS:** verificar em navegadores suportados se existe
+  interpretação ativa não contemplada pelas allowlists atuais.
+- **Hipótese a testar — requisições secundárias:** verificar se fragmentos
+  locais preservados podem alcançar recursos fora do SVG sanitizado no
+  documento do iframe ou durante o uso de `html-to-image`.
 
-Para SVG local, os mesmos riscos de markup ativo existem se o filesystem de
-implantação não for confiável. O caminho normal pressupõe que os arquivos em
-`input` foram revisados.
+SVG local passa pelo mesmo sanitizador. O tamanho é consultado antes da leitura
+e validado novamente sobre o texto. Os quatro logos existentes possuem testes
+estruturais, de idempotência e das propriedades de apresentação essenciais; os
+três que dependem de `.cls-1` preservam `fill="#fff"` como atributo. Isso não
+constitui teste de equivalência visual em navegador. O filesystem continua
+sendo uma fronteira confiada para os demais tipos de asset.
 
 Uma logo HTTP(S) não SVG segue outro caminho: `resolveLogoAsset` não baixa seus
 bytes no servidor, apenas devolve a URL como `src`. O binding de logo atribui
@@ -501,29 +523,37 @@ rejeições não tratadas, e o timer do cliente é removido ao concluir.
 | Local | Status | Exposição |
 | --- | ---: | --- |
 | `/api/news/extract` sem URL | 400 | mensagem fixa |
-| `/api/news/extract` em erro | 500 | mensagem fixa + `error.message` em `detail` |
+| `/api/news/extract` com URL, protocolo ou credenciais inválidas | 400 | categoria estável do cliente seguro |
+| `/api/news/extract` em erro classificado | 500 | mensagem, código e detalhe reconstruído de categoria conhecida |
+| `/api/news/extract` em erro inesperado | 500 | mensagem fixa + `NEWS_EXTRACTION_FAILED` |
 | `/api/news/embed-image` inválida | 400 | mensagem fixa |
-| `/api/news/embed-image` em erro | 422 | mensagem fixa + `error.message` em `detail` |
-| `/api/templates/:template/:page` em erro | 404 | mensagem fixa + `error.message` em `detail` |
-| middleware global | 500 | mensagem fixa + `err.message` em `detail` |
+| `/api/news/embed-image` em erro | 422 | mensagem, código e detalhe reconstruído de categoria conhecida |
+| `/api/templates/:template/:page` ausente | 404 | `TEMPLATE_NOT_FOUND`, sem detalhe interno |
+| manifest inválido | 500 | `TEMPLATE_INVALID`, sem detalhe do parser |
+| falha inesperada ao carregar template | 500 | `TEMPLATE_LOAD_FAILED`, sem detalhe de filesystem |
+| middleware global, JSON malformado | 400 | `INVALID_JSON` |
+| middleware global, corpo acima de 2 MB | 413 | `PAYLOAD_TOO_LARGE` |
+| middleware global, erro inesperado | 500 | `INTERNAL_ERROR` |
 
-Mensagens de filesystem podem conter caminhos absolutos. Para os downloads, o
-cliente compartilhado traduz falhas conhecidas para mensagens fixas e
-classificadas, sem incluir URL, hostname ou endereço; erros de outras origens
-ainda podem trazer detalhes internos.
+As rotas não enviam diretamente `error.message`. Detalhes de falhas remotas só
+são incluídos depois de reconstruídos a partir de uma allowlist de categorias
+do cliente seguro; mensagens Axios, hostnames, endereços, paths e stacks ficam
+fora da resposta.
 
-- **Vulnerabilidade confirmada pelo código — exposição de detalhes:** valores
-  de `error.message` são enviados ao cliente em múltiplas respostas.
-- **Risco dependente do ambiente:** o conteúdo exato depende do erro, paths,
-  versões das bibliotecas e configuração de rede.
-- **Defesa existente:** cada resposta também possui uma mensagem pública fixa.
-- **Defesa ausente:** tradução para códigos públicos sem detalhes internos.
+- **Defesa existente:** mensagens e códigos públicos são estáveis e separados
+  do objeto de erro original.
+- **Defesa existente:** testes exercitam mensagem Axios/DNS simulada, caminho
+  de filesystem, erro do parser JSON e stack implícita sem encontrá-los no JSON
+  público.
+- **Risco dependente do ambiente:** novos pontos de resposta adicionados fora
+  desse fluxo ainda precisam usar a mesma separação.
 
 ### Logs
 
 O servidor registra:
 
-- erro global completo;
+- erros de rotas e middleware com método, rota, status, categoria pública,
+  contexto da operação e objeto de erro original;
 - falha ao importar `config.js`;
 - endereço e porta de escuta;
 - chapéu extraído.
@@ -557,12 +587,16 @@ O frontend registra erros de API, preview, bindings e geração no console.
 
 - **Defesa existente:** texto de notícia e campos manuais atuais usam
   `textContent`.
-- **Defesas ausentes:** sanitização de SVG, sanitização de templates, sandbox,
-  CSP e allowlists de bindings.
+- **Defesa existente:** SVG local e remoto passa por parser XML estrito e
+  allowlists e gramáticas restritas de valores antes de chegar ao binding;
+  estilos locais simples reconhecidos são convertidos em atributos, e
+  `style` arbitrário não é preservado.
+- **Defesas ausentes:** sanitização de templates, sandbox, CSP e allowlists de
+  bindings.
 - **Dependente do ambiente:** templates/manifests/assets locais precisam ser
   comprometidos ou uma logo remota configurada precisa fornecer conteúdo
   ativo.
-- **Hipóteses a testar:** execução por SVG inserido com `innerHTML`, binding
+- **Hipóteses a testar:** bypass das allowlists SVG em navegador, binding
   `html`, atributos, toast e fechamento de script no manifest.
 
 ### Consumo excessivo de recursos
@@ -578,11 +612,13 @@ O frontend registra erros de API, preview, bindings e geração no console.
 
 ### Vazamento de informações
 
-- **Confirmado pelo código:** `error.message` é exposto por rotas e middleware.
-- **Dependente do ambiente:** conteúdo revelado varia conforme filesystem,
-  rede, Axios e operação.
-- **Defesa existente:** mensagens públicas fixas acompanham o detalhe.
-- **Defesa ausente:** remoção ou correlação interna dos detalhes sensíveis.
+- **Defesa existente:** rotas e middleware revisados não expõem diretamente
+  `error.message`, paths, stacks ou mensagens do Axios/DNS.
+- **Dependente do ambiente:** logs internos conservam o erro original e podem
+  conter filesystem, rede e configuração; acesso e retenção dos logs continuam
+  sendo responsabilidades operacionais.
+- **Defesa ausente:** identificador de correlação e política central de redaction
+  para logs.
 
 ## Cobertura e lacunas de verificação
 
@@ -594,7 +630,7 @@ simulam os três fluxos externos. Ela não cobre:
 
 - integração real de redirects e compressão;
 - decodificação completa e integridade estrutural das imagens;
-- erros internos não originados no cliente compartilhado;
+- política de redaction e correlação dos logs internos;
 - execução de SVG local ou remoto em navegador;
 - bindings e `innerHTML`;
 - construção do iframe;
@@ -609,8 +645,6 @@ constituem garantia de segurança da pilha de rede completa.
 Este modelo registra o estado atual. Ele não:
 
 - define uma política futura completa;
-- escolhe bibliotecas de sanitização;
-- modifica mensagens ou contratos HTTP;
 - altera o iframe;
 - estabelece limites operacionais ideais;
 - comprova hipóteses que exigem testes de integração ou navegador.

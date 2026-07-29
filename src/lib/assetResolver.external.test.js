@@ -112,6 +112,32 @@ describe('resolveLogoAsset com SVG remoto simulado', () => {
     });
   });
 
+  test.each([
+    '<svg><script>alert(1)</script><path d="M0 0h1v1z"/></svg>',
+    '<svg><foreignObject><iframe src="https://evil.test"/></foreignObject></svg>',
+    '<svg><path onload="steal()" fill="url(javascript:alert(1))"/></svg>',
+  ])('remove conteúdo ativo de SVG remoto: %s', async (markup) => {
+    const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
+    currentClient.get.mockResolvedValue(svgResponse(publicUrl, markup));
+
+    const result = await resolveLogoAsset(publicUrl);
+
+    expect(result.kind).toBe('inline-svg');
+    expect(result.markup).not.toMatch(
+      /script|foreignObject|iframe|onload|javascript:|evil\.test/i
+    );
+  });
+
+  test('rejeita XML remoto malformado', async () => {
+    const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
+    currentClient.get.mockResolvedValue(svgResponse(publicUrl, '<svg><g></svg>'));
+
+    await expect(resolveLogoAsset(publicUrl)).rejects.toMatchObject({
+      code: 'INVALID_SVG',
+      message: 'Conteúdo SVG inválido ou não permitido',
+    });
+  });
+
   test('aceita redirecionamento público com limite configurado pelo módulo', async () => {
     const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
     currentClient.get.mockResolvedValue(svgResponse(redirectedPublicUrl));

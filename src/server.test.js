@@ -206,7 +206,7 @@ describe('aplicação Express', () => {
     }
   );
 
-  test('converte erro do parser JSON pelo middleware global', async () => {
+  test('converte JSON malformado em erro público 400 sem expor o parser', async () => {
     const app = loadApp();
     const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -218,16 +218,105 @@ describe('aplicação Express', () => {
       });
       const body = await response.json();
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(400);
       expect(body).toEqual({
-        error: 'Erro interno do servidor',
-        detail: expect.any(String),
+        error: 'JSON inválido',
+        code: 'INVALID_JSON',
       });
-      expect(body.detail).not.toBe('');
-      expect(consoleError).toHaveBeenCalled();
+      expect(JSON.stringify(body)).not.toMatch(/SyntaxError|JSON\.parse|stack/i);
+      expect(consoleError).toHaveBeenCalledWith(
+        '[server] falha na requisição',
+        expect.objectContaining({
+          method: 'POST',
+          path: '/api/news/extract',
+          status: 400,
+          code: 'INVALID_JSON',
+        }),
+        expect.any(Error)
+      );
       expect(require('./services/newsScraper').fetch).not.toHaveBeenCalled();
       expect(require('axios').get).not.toHaveBeenCalled();
     });
+  });
+
+  test('converte corpo JSON acima de 2 MB em resposta 413 estável', async () => {
+    const app = loadApp();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/news/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'x'.repeat(2 * 1024 * 1024) }),
+      });
+
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toEqual({
+        error: 'Corpo da requisição excede o limite permitido',
+        code: 'PAYLOAD_TOO_LARGE',
+      });
+    });
+  });
+
+  test('middleware global não expõe detalhes de erro inesperado', async () => {
+    jest.doMock('./routes/templates', () => {
+      const express = require('express');
+      const router = express.Router();
+      router.get('/', () => {
+        throw new Error('AxiosError: getaddrinfo ENOTFOUND internal.local C:\\app\\secret');
+      });
+      return router;
+    });
+    const app = loadApp();
+    jest.dontMock('./routes/templates');
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/templates`);
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({
+        error: 'Erro interno do servidor',
+        code: 'INTERNAL_ERROR',
+      });
+      expect(JSON.stringify(body)).not.toMatch(
+        /AxiosError|ENOTFOUND|internal\.local|C:\\|stack/i
+      );
+      expect(consoleError).toHaveBeenCalled();
+    });
+  });
+
+  test('delega erro quando a resposta já foi iniciada sem enviar um segundo JSON', async () => {
+    const express = require('express');
+    const { globalErrorHandler } = loadApp();
+    const isolatedApp = express();
+    const originalError = new Error('falha depois do início da resposta');
+    let delegatedError = null;
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    isolatedApp.get('/partial', (req, res, next) => {
+      res.status(200);
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      res.write('resposta parcial');
+      next(originalError);
+    });
+    isolatedApp.use(globalErrorHandler);
+    isolatedApp.use((err, req, res, next) => {
+      delegatedError = err;
+      res.end();
+    });
+
+    await withHttpServer(isolatedApp, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/partial`);
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('resposta parcial');
+      expect(response.headers.get('content-type')).toContain('text/plain');
+    });
+
+    expect(delegatedError).toBe(originalError);
+    expect(consoleError).not.toHaveBeenCalled();
   });
 
   test('o entrypoint inicia o servidor na porta configurada', async () => {

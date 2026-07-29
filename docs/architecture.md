@@ -42,12 +42,15 @@ template em disco ──> backend ────+──> frontend
 │   └── lib/
 │       ├── manifestLoader.js       # descoberta e leitura de manifests
 │       ├── assetResolver.js        # resolução de logos locais/remotas
+│       ├── httpErrorResponse.js    # erros públicos e logs HTTP
 │       ├── imageValidator.js       # MIME, tamanho e assinatura de imagens
 │       ├── imageValidator.test.js  # testes da validação binária
 │       ├── remoteRequestPolicy.js  # limites dos downloads remotos
 │       ├── remoteRequestPolicy.test.js # testes dos limites compartilhados
 │       ├── safeHttpClient.js       # cliente compartilhado para URLs remotas
-│       └── safeHttpClient.test.js  # classificação e controles do cliente
+│       ├── safeHttpClient.test.js  # classificação e controles do cliente
+│       ├── svgSanitizer.js         # parsing XML e allowlist de SVG
+│       └── svgSanitizer.test.js    # SVGs válidos e conteúdo ativo
 ├── public/
 │   ├── index.html                 # estrutura da interface e do modal
 │   ├── styles.css                 # apresentação da interface
@@ -126,6 +129,20 @@ imagens. Ele aceita apenas PNG, JPEG, GIF e WebP, normaliza parâmetros do MIME,
 rejeita corpo vazio ou acima do limite e compara uma assinatura básica com o
 tipo declarado. As falhas usam mensagens classificadas e estáveis.
 
+`src/lib/httpErrorResponse.js` separa respostas públicas de diagnóstico
+interno. Ele reconhece categorias estáveis do cliente HTTP, classifica erros do
+parser JSON e registra método, rota, status, código público e o erro original
+somente no log do servidor.
+
+`src/lib/svgSanitizer.js` usa o parser XML estrito `saxes` e reconstrói o SVG a
+partir de allowlists de elementos, atributos e valores. Scripts,
+`foreignObject`, handlers, estilos inline, elementos de animação, CSS
+arbitrário, referências externas e valores CSS ofuscados não entram no markup
+resultante. Somente regras locais com seletor de classe simples e propriedades
+de apresentação reconhecidas são convertidas em atributos validados; o elemento
+`style` nunca permanece no resultado. XML malformado e documentos sem raiz SVG
+são rejeitados. O mesmo sanitizador atende assets locais e remotos.
+
 `src/services/newsScraper.js` baixa o HTML da notícia e usa Cheerio para extrair
 título, subtítulo, imagem e chapéu. O texto é normalizado e limitado. A
 responsabilidade de baixar a imagem extraída não pertence a esse serviço.
@@ -193,8 +210,10 @@ página. Dentro de cada diretório, a ordem é a fornecida por `fs.readdirSync`,
 sem ordenação explícita. O frontend concatena o conteúdo recebido na mesma
 ordem.
 
-Erros no carregamento da página são convertidos em HTTP 404. Falhas ao resolver
-a logo são absorvidas e resultam em `resolvedLogo: null`.
+Ausência de template, página, manifest ou HTML é convertida em HTTP 404 com
+`TEMPLATE_NOT_FOUND`. Manifest JSON inválido e falhas inesperadas de filesystem
+usam HTTP 500 com categorias públicas estáveis. Falhas ao resolver a logo são
+registradas internamente e resultam em `resolvedLogo: null`.
 
 ## Extração de notícias
 
@@ -229,7 +248,9 @@ Na resposta bem-sucedida, quando a imagem encontrada é uma URL HTTP ou HTTPS,
 `bg` contém a imagem incorporada e `bgSource` conserva a URL extraída.
 Referências relativas são preservadas em ambos os campos, sem resolução contra
 a URL da notícia. A resposta também contém `h1`, `h2` e `chapeu`. Ausência da
-URL gera HTTP 400; falha de download, parsing ou incorporação gera HTTP 500.
+URL gera HTTP 400; URL inválida, protocolo não permitido ou credenciais
+embutidas também geram HTTP 400. Falha de download, parsing ou incorporação
+gera HTTP 500.
 
 No frontend, o resultado é guardado em `lastNewsData` e associado a
 `lastNewsUrl`. Ao buscar explicitamente, os campos manuais vazios são
@@ -453,8 +474,8 @@ No backend:
 - abertura da porta HTTP quando `server.js` é executado como entrypoint;
 - requisições HTTP para notícias, imagens e SVGs remotos;
 - mutação dos caches em memória;
-- logs de configuração, servidor, chapéu e erros;
-- envio de detalhes de exceções em respostas HTTP.
+- logs de configuração, servidor, chapéu e erros; logs de requisição com falha
+  incluem o erro original e contexto operacional.
 
 No frontend:
 
@@ -505,10 +526,13 @@ No frontend:
 - Notícias, imagens e SVG remoto possuem timeout, limite de bytes e limite de
   redirecionamentos. Notícias aceitam `text/html` e `application/xhtml+xml`;
   SVG remoto exige `image/svg+xml`.
-- SVG remoto ou local é inserido como `innerHTML` no iframe sem sanitização
-  observável.
-- O middleware global e algumas rotas retornam `error.message`, que pode conter
-  detalhes internos.
+- SVG remoto ou local continua inserido como `innerHTML`, mas o markup passa por
+  parsing XML estrito, gramáticas restritas de valores e allowlists antes de ser
+  retornado. Os testes preservam propriedades estruturais e de apresentação
+  essenciais dos quatro logos atuais, mas não demonstram equivalência visual
+  completa nem substituem validação em navegador.
+- Rotas e middleware global retornam mensagens e códigos públicos estáveis;
+  caminhos, stacks e mensagens originais permanecem somente nos logs internos.
 - A API de extração converte falhas em `{}` no cliente, perdendo o detalhe da
   resposta antes que o fluxo principal trate o resultado.
 - A listagem do frontend e a listagem do backend podem divergir.

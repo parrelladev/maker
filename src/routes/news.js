@@ -2,8 +2,17 @@ const express = require('express');
 const safeHttpClient = require('../lib/safeHttpClient');
 const { validateImageResponse } = require('../lib/imageValidator');
 const { IMAGE_REQUEST_POLICY } = require('../lib/remoteRequestPolicy');
+const {
+  getPublicRemoteError,
+  logRequestError,
+} = require('../lib/httpErrorResponse');
 const newsScraper = require('../services/newsScraper');
 const { SafeHttpError } = safeHttpClient;
+const NEWS_URL_ERROR_CODES = new Set([
+  'INVALID_URL',
+  'UNSUPPORTED_PROTOCOL',
+  'URL_CREDENTIALS',
+]);
 
 const router = express.Router();
 
@@ -48,9 +57,20 @@ router.post('/extract', async (req, res) => {
 
     return res.json({ h1, h2, bg: embeddedBg, bgSource: bg, chapeu });
   } catch (error) {
-    return res.status(500).json({
-      error: 'Erro ao extrair dados da notícia',
-      detail: error.message,
+    const publicError = getPublicRemoteError(error, {
+      fallbackCode: 'NEWS_EXTRACTION_FAILED',
+    });
+    const invalidNewsUrl = NEWS_URL_ERROR_CODES.has(publicError.code);
+    const status = invalidNewsUrl ? 400 : 500;
+    logRequestError('news.extract', req, error, {
+      status,
+      code: publicError.code,
+    });
+    return res.status(status).json({
+      error: invalidNewsUrl
+        ? 'URL da notícia inválida'
+        : 'Erro ao extrair dados da notícia',
+      ...publicError,
     });
   }
 });
@@ -66,9 +86,17 @@ router.post('/embed-image', async (req, res) => {
     const dataUrl = await embedImage(url);
     return res.json({ dataUrl });
   } catch (error) {
+    const publicError = getPublicRemoteError(error, {
+      fallbackCode: 'IMAGE_DOWNLOAD_FAILED',
+      fallbackDetail: 'Falha ao baixar a imagem',
+    });
+    logRequestError('news.embed-image', req, error, {
+      status: 422,
+      code: publicError.code,
+    });
     return res.status(422).json({
       error: 'Não foi possível baixar a imagem',
-      detail: error.message,
+      ...publicError,
     });
   }
 });

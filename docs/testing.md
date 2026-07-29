@@ -105,16 +105,18 @@ Não há configuração de limite mínimo de cobertura, snapshots ou setup globa
 
 ## Testes existentes
 
-Existem oito arquivos:
+Existem dez arquivos:
 
 ```text
 src/server.test.js
 src/routes/templates.test.js
 src/routes/news.external.test.js
 src/lib/assetResolver.external.test.js
+src/lib/assetResolver.local.test.js
 src/lib/imageValidator.test.js
 src/lib/remoteRequestPolicy.test.js
 src/lib/safeHttpClient.test.js
+src/lib/svgSanitizer.test.js
 src/services/newsScraper.test.js
 ```
 
@@ -126,8 +128,11 @@ A suíte de `server.test.js` verifica:
 4. manter registradas `GET /api/templates` e `POST /api/news/extract`;
 5. URL obrigatória em `POST /api/news/extract`;
 6. URL ausente e protocolo inválido em `POST /api/news/embed-image`;
-7. JSON malformado convertido em resposta 500 pelo middleware global;
-8. iniciar o servidor ao executar `src/server.js` como entrypoint.
+7. JSON malformado convertido em resposta pública 400 sem detalhe do parser;
+8. erro após início da resposta delegado ao próximo middleware, sem segundo JSON;
+9. corpo JSON acima de 2 MB convertido em 413;
+10. erro global inesperado convertido em 500 sem mensagem interna;
+11. iniciar o servidor ao executar `src/server.js` como entrypoint.
 
 `axios` e `newsScraper` são mockados em `server.test.js`. Os testes HTTP
 adicionados exercitam somente o servidor local e o filesystem do repositório,
@@ -154,17 +159,25 @@ Essa suíte verifica:
 8. CSS compartilhado do template e CSS específico da página;
 9. logo local e logo ausente.
 
+Os caminhos negativos confirmam respostas 404 estáveis sem paths para recursos
+ausentes e resposta 500 sem detalhe do parser para manifest JSON inválido.
+
 A suíte de `src/routes/news.external.test.js` caracteriza a incorporação de
 imagens com o cliente compartilhado mockado: URL pública, timeout, rejeição por
 tamanho, MIME inesperado, corpo vazio, assinatura incompatível, erro inesperado
 sem exposição do detalhe, redirect público e bloqueio de destinos não públicos,
-inclusive após redirect. Ela também confirma a data URL e a mensagem estável
-quando a incorporação ocorre dentro de `/extract`.
+inclusive após redirect. Ela também confirma a data URL, categorias inválidas de
+URL da notícia convertidas em 400 e a mensagem estável quando a incorporação
+ocorre dentro de `/extract`.
 
 A suíte de `src/lib/assetResolver.external.test.js` caracteriza SVG remoto com
 o cliente compartilhado mockado. Ela registra timeout, limite de resposta e
 redirects configurados, exigência de `image/svg+xml` e bloqueio de destinos não
-públicos.
+públicos. Também verifica remoção de scripts, `foreignObject`, handlers e URLs
+perigosas, além da rejeição de XML malformado.
+
+A suíte de `src/lib/assetResolver.local.test.js` confirma que SVG local também
+é sanitizado e que arquivos acima de 1 MB são rejeitados antes da leitura.
 
 A suíte de `src/lib/imageValidator.test.js` cobre assinaturas reconhecidas de
 PNG, JPEG, GIF e WebP, parâmetros no MIME, tipos ausentes, genéricos ou
@@ -188,6 +201,14 @@ Testes com relógio injetado verificam a deadline total, DNS pendente, DNS lento
 saldo repassado a cada redirect, conclusão dentro do orçamento e remoção de
 timers em sucesso e erro.
 
+A suíte de `src/lib/svgSanitizer.test.js` cobre parsing XML estrito, raiz SVG,
+limite de bytes, scripts, handlers, `foreignObject`, CSS não suportado, URLs
+externas, valores CSS ofuscados, referências locais canônicas, `DOCTYPE` e XML
+malformado. Para os quatro logos locais, confirma estrutura, ausência de markup
+ativo, idempotência e propriedades de apresentação essenciais; nos três logos
+baseados em `.cls-1`, verifica a conversão para `fill="#fff"` sem conservar
+`style`. Esses testes não afirmam equivalência visual completa em navegador.
+
 A suíte de `src/services/newsScraper.test.js` importa `extractChapeu`, cria
 fragmentos HTML em memória com Cheerio e verifica três comportamentos:
 
@@ -208,14 +229,15 @@ bloqueio de destinos não públicos.
 
 | Módulo | Símbolo | Comportamento demonstrado |
 | --- | --- | --- |
-| `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erro de JSON e inicialização direta |
-| `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes |
+| `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erros públicos, delegação após `headersSent` e inicialização direta |
+| `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes e erros públicos sem paths |
 | `src/lib/manifestLoader.js` | `listTemplates` e `loadManifest` por meio das rotas | descoberta, filtragem, parsing e validação dos arquivos mínimos |
 | `src/lib/assetResolver.js` | `resolveLogoAsset` | SVG local, fallback de logo ausente e download SVG remoto simulado |
 | `src/lib/imageValidator.js` | `validateImageResponse` | allowlist de MIME, corpo binário, tamanho, vazio e assinaturas básicas |
 | `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
 | `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, contrato Axios e conexão local real |
-| `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros e bloqueios |
+| `src/lib/svgSanitizer.js` | `sanitizeSvg` | XML estrito, gramáticas de valores, CSS local simples, referências locais, idempotência, limite e SVGs maliciosos representativos |
+| `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
@@ -239,7 +261,6 @@ de cobertura.
 ### Backend
 
 - resolução de `PORT` e `config.js`;
-- limite de 2 MB do parser JSON;
 - ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
 - redirects reais, respostas comprimidas e streams interrompidos;
 - ordem dos arquivos CSS dentro de um mesmo diretório;
@@ -275,8 +296,8 @@ de cobertura.
 - timeouts;
 - decodificação completa, integridade estrutural, arquivos truncados e
   políglotas;
-- exposição de detalhes internos;
-- SVG ativo e `innerHTML`;
+- redaction e retenção dos logs internos;
+- interpretação do SVG sanitizado por `innerHTML` em navegador real;
 - isolamento do iframe;
 - concorrência, memória e CPU.
 
@@ -317,12 +338,12 @@ npm.cmd test
 Resultado observado:
 
 ```text
-Test Suites: 8 passed, 8 total
-Tests:       161 passed, 161 total
+Test Suites: 10 passed, 10 total
+Tests:       206 passed, 206 total
 Snapshots:   0 total
 ```
 
-Todos os 161 testes existentes passaram. Uma requisição controlada usa a pilha
+Todos os 206 testes existentes passaram. Uma requisição controlada usa a pilha
 Axios/lookup/socket local; nenhuma chamada à internet é realizada.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.

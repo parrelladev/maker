@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const safeHttpClient = require('./safeHttpClient');
-const { SVG_REQUEST_POLICY } = require('./remoteRequestPolicy');
+const { SVG_MAX_BYTES, SVG_REQUEST_POLICY } = require('./remoteRequestPolicy');
+const { SvgValidationError, sanitizeSvg } = require('./svgSanitizer');
 const { assertContentType } = safeHttpClient;
 
 const INPUT_DIR = path.resolve('input');
@@ -29,10 +30,9 @@ async function resolveLogoAsset(value, altText) {
         responseType: 'text',
       });
       assertContentType(response.headers?.['content-type'], ['image/svg+xml']);
-      const markup = String(response.data || '').trim();
-      if (!markup.includes('<svg')) {
-        throw new Error(`Conteúdo SVG inválido em ${value}`);
-      }
+      const markup = sanitizeSvg(String(response.data || ''), {
+        maxBytes: SVG_MAX_BYTES,
+      });
       const result = { kind: 'inline-svg', markup, source: value, sourceType: 'remote', alt: altText };
       LOGO_CACHE.set(value, result);
       return result;
@@ -51,13 +51,15 @@ async function resolveLogoAsset(value, altText) {
     if (!fs.existsSync(candidatePath)) continue;
 
     if (candidate.toLowerCase().endsWith('.svg')) {
-      const markup = fs.readFileSync(candidatePath, 'utf-8');
-      if (!markup.includes('<svg')) {
-        throw new Error(`Conteúdo SVG inválido em ${candidatePath}`);
+      if (fs.statSync(candidatePath).size > SVG_MAX_BYTES) {
+        throw new SvgValidationError('SVG_TOO_LARGE');
       }
+      const markup = sanitizeSvg(fs.readFileSync(candidatePath, 'utf-8'), {
+        maxBytes: SVG_MAX_BYTES,
+      });
       const result = {
         kind: 'inline-svg',
-        markup: markup.trim(),
+        markup,
         source: candidatePath,
         sourceType: 'local',
         alt: altText,

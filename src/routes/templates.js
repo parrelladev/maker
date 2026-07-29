@@ -3,8 +3,39 @@ const fs = require('fs');
 const path = require('path');
 const { listTemplates, loadManifest } = require('../lib/manifestLoader');
 const { resolveLogoAsset } = require('../lib/assetResolver');
+const { logRequestError } = require('../lib/httpErrorResponse');
 
 const router = express.Router();
+
+function getTemplateErrorResponse(error) {
+  if (error instanceof SyntaxError) {
+    return {
+      status: 500,
+      body: {
+        error: 'Template inválido',
+        code: 'TEMPLATE_INVALID',
+      },
+    };
+  }
+
+  if (error?.code) {
+    return {
+      status: 500,
+      body: {
+        error: 'Não foi possível carregar o template',
+        code: 'TEMPLATE_LOAD_FAILED',
+      },
+    };
+  }
+
+  return {
+    status: 404,
+    body: {
+      error: 'Template não encontrado',
+      code: 'TEMPLATE_NOT_FOUND',
+    },
+  };
+}
 
 router.get('/', (req, res) => {
   const templates = listTemplates().map((entry) => ({
@@ -66,7 +97,13 @@ router.get('/:template/:page', async (req, res) => {
             };
           }
         }
-      } catch (e) {
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[templates] falha ao resolver logo',
+          { template, page, code: error?.code || 'LOGO_RESOLUTION_FAILED' },
+          error
+        );
         resolvedLogo = null;
       }
     }
@@ -80,10 +117,14 @@ router.get('/:template/:page', async (req, res) => {
       resolvedLogo,
     });
   } catch (error) {
-    res.status(404).json({
-      error: 'Template nǜo encontrado',
-      detail: error.message,
+    const response = getTemplateErrorResponse(error);
+    logRequestError('templates.load', req, error, {
+      status: response.status,
+      code: response.body.code,
+      template: req.params.template,
+      page: req.params.page,
     });
+    res.status(response.status).json(response.body);
   }
 });
 

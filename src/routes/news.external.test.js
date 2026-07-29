@@ -65,9 +65,14 @@ function mockImageResponse(finalUrl = publicUrl, remoteAddress) {
 }
 
 describe('incorporação de imagem com respostas HTTP simuladas', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
   afterEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   test('incorpora imagem de URL pública com os limites atuais', async () => {
@@ -119,6 +124,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       const { response, body } = await postImage(baseUrl, publicUrl);
 
       expect(response.status).toBe(422);
+      expect(body.code).toBe('TIMEOUT');
       expect(body.detail).toBe('Tempo limite da requisição externa excedido');
     });
   });
@@ -132,6 +138,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       const { response, body } = await postImage(baseUrl, publicUrl);
 
       expect(response.status).toBe(422);
+      expect(body.code).toBe('RESPONSE_TOO_LARGE');
       expect(body.detail).toBe('Resposta externa excede o limite permitido');
       expect(require('../lib/safeHttpClient').get.mock.calls[0][1].maxBytes).toBe(
         12 * 1024 * 1024
@@ -149,6 +156,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       const { response, body } = await postImage(baseUrl, publicUrl);
 
       expect(response.status).toBe(422);
+      expect(body.code).toBe('UNEXPECTED_CONTENT_TYPE');
       expect(body.detail).toBe(
         'Servidor remoto retornou um tipo de conteúdo inválido'
       );
@@ -167,6 +175,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       expect(response.status).toBe(422);
       expect(body).toEqual({
         error: 'Não foi possível baixar a imagem',
+        code: 'EMPTY_RESPONSE',
         detail: 'Servidor remoto retornou uma imagem vazia',
       });
     });
@@ -184,6 +193,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       expect(response.status).toBe(422);
       expect(body).toEqual({
         error: 'Não foi possível baixar a imagem',
+        code: 'INVALID_IMAGE_CONTENT',
         detail: 'O conteúdo remoto não corresponde a uma imagem válida',
       });
       expect(JSON.stringify(body)).not.toContain('internal response body');
@@ -208,6 +218,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       expect(response.status).toBe(500);
       expect(body).toEqual({
         error: 'Erro ao extrair dados da notícia',
+        code: 'INVALID_IMAGE_CONTENT',
         detail: 'O conteúdo remoto não corresponde a uma imagem válida',
       });
       expect(JSON.stringify(body)).not.toContain('private upstream response');
@@ -225,6 +236,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       expect(response.status).toBe(422);
       expect(body).toEqual({
         error: 'Não foi possível baixar a imagem',
+        code: 'REQUEST_FAILED',
         detail: 'Falha na requisição externa',
       });
       expect(JSON.stringify(body)).not.toContain('10.0.0.1');
@@ -253,6 +265,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
         const { response, body } = await postImage(baseUrl, url);
 
         expect(response.status).toBe(422);
+        expect(body.code).toBe('BLOCKED_ADDRESS');
         expect(body.detail).toBe('Destino de rede não permitido');
         expect(require('../lib/safeHttpClient').get).toHaveBeenCalledWith(url, expect.any(Object));
       });
@@ -268,7 +281,49 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       const { response, body } = await postImage(baseUrl, publicUrl);
 
       expect(response.status).toBe(422);
+      expect(body.code).toBe('BLOCKED_ADDRESS');
       expect(body.detail).toBe('Destino de rede não permitido');
     });
   });
+
+  test('não expõe mensagem interna de falha inesperada da extração', async () => {
+    await withNewsServer(async (baseUrl) => {
+      const internalMessage =
+        'AxiosError: getaddrinfo ENOTFOUND internal.local C:\\app\\news.js';
+      require('../services/newsScraper').fetch.mockRejectedValue(
+        new Error(internalMessage)
+      );
+      const { response, body } = await postNews(baseUrl, publicUrl);
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({
+        error: 'Erro ao extrair dados da notícia',
+        code: 'NEWS_EXTRACTION_FAILED',
+      });
+      expect(JSON.stringify(body)).not.toMatch(
+        /AxiosError|ENOTFOUND|internal\.local|C:\\|stack/i
+      );
+      expect(console.error).toHaveBeenCalled();
+    });
+  });
+
+  test.each(['INVALID_URL', 'UNSUPPORTED_PROTOCOL', 'URL_CREDENTIALS'])(
+    'converte %s da URL da notícia em resposta 400',
+    async (code) => {
+      await withNewsServer(async (baseUrl) => {
+        require('../services/newsScraper').fetch.mockRejectedValue(
+          new SafeHttpError(code)
+        );
+
+        const { response, body } = await postNews(baseUrl, 'valor-inválido');
+
+        expect(response.status).toBe(400);
+        expect(body).toMatchObject({
+          error: 'URL da notícia inválida',
+          code,
+        });
+        expect(body.detail).toEqual(expect.any(String));
+      });
+    }
+  );
 });
