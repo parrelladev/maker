@@ -69,6 +69,8 @@ class FakeElement {
 }
 
 function createHarness() {
+  jest.useFakeTimers();
+
   const ids = [
     'templateModal',
     'closeModal',
@@ -139,6 +141,13 @@ function createHarness() {
   context.window = context;
   vm.createContext(context);
   const source = fs.readFileSync(path.join(__dirname, 'script.js'), 'utf8');
+  const utilsSource = fs.readFileSync(
+    path.join(__dirname, 'js', 'frontend-utils.js'),
+    'utf8'
+  );
+  vm.runInContext(utilsSource, context, {
+    filename: 'public/js/frontend-utils.js'
+  });
   vm.runInContext(source, context, { filename: 'public/script.js' });
   (documentListeners.DOMContentLoaded || []).forEach(listener => listener());
 
@@ -411,5 +420,60 @@ describe('contrato de estado de public/script.js', () => {
     });
     expect(harness.elements.customTitle.value).toBe('');
     expect(harness.elements.templateModal.classList.contains('show')).toBe(true);
+  });
+});
+
+describe('contratos das transformações usadas por public/script.js', () => {
+  test.each([
+    ['http://example.com/noticia', true],
+    ['https://example.com/noticia', true],
+    ['não é uma URL', false]
+  ])('valida a URL %s', (value, expected) => {
+    const harness = createHarness();
+
+    expect(harness.run(`isHttpUrl(${JSON.stringify(value)})`)).toBe(expected);
+  });
+
+  test.each([
+    ['success', 'check-circle'],
+    ['error', 'exclamation-circle'],
+    ['warning', 'info-circle']
+  ])('escolhe o ícone atual para toast %s', (type, icon) => {
+    const harness = createHarness();
+
+    harness.run(`showToast('Mensagem', ${JSON.stringify(type)})`);
+
+    expect(harness.elements.toastContainer.children[0].innerHTML)
+      .toContain(`fa-${icon}`);
+  });
+
+  test('remove espaços dos campos manuais e preserva sua precedência', () => {
+    const harness = createHarness();
+    harness.elements.newsUrl.value = '  https://example.com/noticia  ';
+    harness.elements.customTitle.value = '  Título manual  ';
+    harness.elements.customSubtitle.value = '   ';
+    harness.elements.customTag.value = '  Categoria manual  ';
+    harness.elements.customImageUrl.value = '  https://example.com/manual.jpg  ';
+    harness.run(`
+      lastNewsUrl = 'https://example.com/noticia';
+      lastNewsData = {
+        h1: 'Título extraído',
+        h2: 'Subtítulo extraído',
+        chapeu: 'Categoria extraída',
+        bg: 'https://example.com/extraida.jpg'
+      };
+    `);
+
+    const result = harness.run(`buildPreviewData({
+      manifest: {},
+      resolvedLogo: null
+    })`);
+
+    expect(result).toMatchObject({
+      h1: 'Título manual',
+      h2: 'Subtítulo extraído',
+      tag: 'Categoria manual',
+      bg: 'https://example.com/manual.jpg'
+    });
   });
 });

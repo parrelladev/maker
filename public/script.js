@@ -85,6 +85,13 @@ const storyTemplates = [
   }
 ];
 
+const {
+  buildExportFilename,
+  getToastIcon,
+  isHttpUrl,
+  normalizeOptionalValue
+} = window.FrontendUtils;
+
 const templateLookup = Object.fromEntries(storyTemplates.map(template => [template.id, template]));
 const storyGroups = Array.from(new Set(storyTemplates.map(template => template.group)));
 
@@ -417,7 +424,7 @@ async function loadManifest(template, page = 'index') {
 
 // Etapa 1: busca dados da matéria e monta o preview HTML
 async function handleFetchNewsAndPreview() {
-  const url = newsUrl.value.trim();
+  const url = normalizeOptionalValue(newsUrl.value);
 
   if (!currentTemplate) {
     showToast('Escolha um template antes de buscar os dados', 'error');
@@ -430,7 +437,7 @@ async function handleFetchNewsAndPreview() {
     return;
   }
 
-  if (!isValidUrl(url)) {
+  if (!isHttpUrl(url)) {
     showToast('Por favor, insira um link válido', 'error');
     newsUrl.focus();
     return;
@@ -448,16 +455,16 @@ async function handleFetchNewsAndPreview() {
       return;
     }
 
-    if (!customTitle.value.trim() && extractedData.h1) {
+    if (!normalizeOptionalValue(customTitle.value) && extractedData.h1) {
       customTitle.value = extractedData.h1;
     }
-    if (!customSubtitle.value.trim() && extractedData.h2) {
+    if (!normalizeOptionalValue(customSubtitle.value) && extractedData.h2) {
       customSubtitle.value = extractedData.h2;
     }
-    if (!customTag.value.trim() && extractedData.chapeu) {
+    if (!normalizeOptionalValue(customTag.value) && extractedData.chapeu) {
       customTag.value = extractedData.chapeu;
     }
-    if (!customImageUrl.value.trim() && extractedData.bg) {
+    if (!normalizeOptionalValue(customImageUrl.value) && extractedData.bg) {
       customImageUrl.value = extractedData.bg;
     }
 
@@ -692,14 +699,14 @@ async function ensurePreviewInitialized() {
 }
 
 function buildPreviewData(manifestData, backgroundOverride = null) {
-  const url = newsUrl.value.trim();
+  const url = normalizeOptionalValue(newsUrl.value);
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
   const extractedData = hasMatchingNews ? lastNewsData : {};
 
-  const manualTitle = customTitle.value.trim();
-  const manualSubtitle = customSubtitle.value.trim();
-  const manualTag = customTag.value.trim();
-  const manualBg = customImageUrl.value.trim();
+  const manualTitle = normalizeOptionalValue(customTitle.value);
+  const manualSubtitle = normalizeOptionalValue(customSubtitle.value);
+  const manualTag = normalizeOptionalValue(customTag.value);
+  const manualBg = normalizeOptionalValue(customImageUrl.value);
 
   const effectiveTitle = manualTitle || extractedData.h1 || '';
   const effectiveSubtitle = manualSubtitle || extractedData.h2 || '';
@@ -782,8 +789,8 @@ async function updatePreview(backgroundOverride = null) {
 
 // Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
 async function generateArtWithPreviewFlow() {
-  const url = newsUrl.value.trim();
-  const imageOverride = customImageUrl.value.trim();
+  const url = normalizeOptionalValue(newsUrl.value);
+  const imageOverride = normalizeOptionalValue(customImageUrl.value);
 
   if (!currentTemplate) {
     showToast('Escolha um template antes de gerar a arte', 'error');
@@ -796,13 +803,13 @@ async function generateArtWithPreviewFlow() {
     return;
   }
 
-  if (!isValidUrl(url)) {
+  if (!isHttpUrl(url)) {
     showToast('Por favor, insira um link válido', 'error');
     newsUrl.focus();
     return;
   }
 
-  if (imageOverride && !isValidUrl(imageOverride)) {
+  if (imageOverride && !isHttpUrl(imageOverride)) {
     showToast('Informe um link de imagem válido (http ou https).', 'error');
     customImageUrl.focus();
     return;
@@ -817,11 +824,11 @@ async function generateArtWithPreviewFlow() {
     const extractedData = await getOrExtractNewsData(url);
     const extractedChapeu = extractedData.chapeu || null;
 
-    if (!customTag.value.trim() && extractedChapeu) {
+    if (!normalizeOptionalValue(customTag.value) && extractedChapeu) {
       customTag.value = extractedChapeu;
     }
 
-    const manualTag = customTag.value.trim();
+    const manualTag = normalizeOptionalValue(customTag.value);
     const resolvedChapeu = manualTag || extractedChapeu || '';
     const effectiveBg = imageOverride || extractedData.bg || null;
 
@@ -846,7 +853,7 @@ async function generateArtWithPreviewFlow() {
     await window.PreviewExport.downloadPreview(
       previewFrame,
       manifestData,
-      `${currentTemplate}-${pageName}.png`,
+      buildExportFilename(currentTemplate, pageName),
     );
 
     showToast('Arte gerada e download iniciado!', 'success');
@@ -855,15 +862,6 @@ async function generateArtWithPreviewFlow() {
     showToast('Erro ao gerar arte: ' + error.message, 'error');
   } finally {
     hideLoading();
-  }
-}
-
-function isValidUrl(string) {
-  try {
-    new URL(string);
-    return true;
-  } catch (_) {
-    return false;
   }
 }
 
@@ -881,9 +879,7 @@ function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
 
-  const icon = type === 'success' ? 'check-circle'
-    : type === 'error' ? 'exclamation-circle'
-      : 'info-circle';
+  const icon = getToastIcon(type);
 
   toast.innerHTML = `
     <i class="fas fa-${icon}"></i>

@@ -59,6 +59,7 @@ template em disco ──> backend ────+──> frontend
 │   ├── script.js                  # catálogo, estado e orquestração
 │   ├── js/
 │   │   ├── api.js                 # cliente HTTP e cache de templates
+│   │   ├── frontend-utils.js      # validações e transformações puras
 │   │   └── preview-export.js      # captura e download do PNG
 │   ├── vendor/html-to-image.js    # biblioteca versionada de exportação
 │   └── previews/                  # miniaturas usadas pelo catálogo
@@ -181,8 +182,8 @@ de imagem em HTTP e contém a função privada `embedImage`.
 ### Frontend
 
 `public/index.html` define a grade, o modal, campos manuais, controles, o
-`iframe`, loading e toasts. Ele carrega `api.js`, `preview-export.js` e
-`script.js`, nessa ordem.
+`iframe`, loading e toasts. Ele carrega `api.js`, `preview-export.js`,
+`frontend-utils.js` e `script.js`, nessa ordem.
 
 `public/js/api.js` expõe `window.Api`:
 
@@ -190,6 +191,11 @@ de imagem em HTTP e contém a função privada `embedImage`.
   `<template>/<page>`;
 - `extractNewsData` chama a extração, registra erros e retorna `{}` em falha;
 - `embedImage` solicita ao backend uma data URL e propaga uma mensagem de erro.
+
+`public/js/frontend-utils.js` expõe `window.FrontendUtils` e concentra
+validação de URL HTTP/HTTPS, normalização de valores opcionais, escolha do
+ícone dos toasts e construção do nome do PNG. As funções não acessam o DOM e
+também são exportadas para testes unitários.
 
 `public/script.js` mantém o catálogo visível, o estado global da tela e a
 orquestração dos fluxos. Ele também gera como string o runtime de bindings

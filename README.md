@@ -139,6 +139,7 @@ public/
   script.js
   js/
     api.js
+    frontend-utils.js
     preview-export.js
   vendor/
     html-to-image.js
