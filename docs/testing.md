@@ -261,7 +261,20 @@ A suíte de `public/js/frontend-utils.test.js` cobre as transformações puras d
 frontend, incluindo normalização, URL HTTP/HTTPS, nome do arquivo e
 `validateGenerationInput`. Para a validação da geração, confirma resultados
 estruturados com validade, código, mensagem e campo de foco para todas as
-pré-condições atuais, nas fases inicial e posterior à extração.
+pré-condições atuais, nas fases inicial e posterior à extração. Os testes
+separam a imagem manual, limitada a HTTP/HTTPS, da imagem resolvida, que também
+aceita data URL Base64 de PNG, JPEG, GIF e WebP. Casos de SVG, HTML, MIME
+ausente ou genérico, cabeçalho inválido, payload vazio, ausência de Base64 e
+protocolos não permitidos são rejeitados. O fluxo integrado cobre uma data URL
+JPEG extraída chegando ao preview e à exportação, além da rejeição da mesma
+forma quando digitada no campo manual.
+
+`public/script.test.js` também cobre o fluxo “Buscar dados → Criar”, a
+reutilização da imagem extraída pelo cache, a invalidação da origem automática
+após um evento `input`, a limpeza dessa origem entre modal e template e a
+incorporação de uma imagem manual HTTP cujo backend retorna uma data URL JPEG
+validada. Nesses fluxos, preview e exportação recebem a mesma imagem e loading e
+botão são restaurados.
 
 ## Módulos e comportamentos cobertos
 
@@ -280,8 +293,8 @@ pré-condições atuais, nas fases inicial e posterior à extração.
 | `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
-| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, precedência manual e restauração do loading e botão nos caminhos cobertos |
-| `public/js/frontend-utils.js` | `validateGenerationInput` e transformações auxiliares | validação pura estruturada, URL HTTP/HTTPS, normalização, ícones de toast e nome do PNG |
+| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, precedência manual, data URL extraída no preview/exportação e restauração do loading e botão nos caminhos cobertos |
+| `public/js/frontend-utils.js` | `validateGenerationInput` e transformações auxiliares | validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
 que todas as suas funções estejam cobertas. Não foi gerado relatório percentual

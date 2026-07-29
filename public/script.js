@@ -89,6 +89,7 @@ const {
   buildExportFilename,
   getToastIcon,
   isHttpUrl,
+  isValidResolvedImageValue,
   normalizeOptionalValue,
   validateGenerationInput
 } = window.FrontendUtils;
@@ -106,6 +107,11 @@ let lastNewsData = null;
 let lastNewsUrl = null;
 let currentManifestData = null;
 let previewInitializedTemplate = null;
+let resolvedImageFieldState = {
+  source: null,
+  value: null,
+  newsUrl: null
+};
 
 const modal = document.getElementById('templateModal');
 const closeModal = document.getElementById('closeModal');
@@ -128,14 +134,47 @@ const previewFrame = document.getElementById('previewFrame');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
 
 function readGenerationFormData() {
+  const imageFieldValue = normalizeOptionalValue(customImageUrl.value);
+  const hasMatchingResolvedImage = (
+    resolvedImageFieldState.source === 'extracted'
+    && resolvedImageFieldState.value === customImageUrl.value
+    && resolvedImageFieldState.newsUrl === normalizeOptionalValue(newsUrl.value)
+  );
+
   return {
     newsUrl: normalizeOptionalValue(newsUrl.value),
     manualTitle: normalizeOptionalValue(customTitle.value),
     manualSubtitle: normalizeOptionalValue(customSubtitle.value),
     manualCategory: normalizeOptionalValue(customTag.value),
-    manualImage: normalizeOptionalValue(customImageUrl.value),
+    manualImage: hasMatchingResolvedImage ? '' : imageFieldValue,
+    resolvedImage: hasMatchingResolvedImage ? imageFieldValue : '',
     theme: currentTheme,
     template: currentTemplate
+  };
+}
+
+function clearResolvedImageFieldState({ clearMatchingField = false } = {}) {
+  if (
+    clearMatchingField
+    && resolvedImageFieldState.source === 'extracted'
+    && resolvedImageFieldState.value === customImageUrl.value
+  ) {
+    customImageUrl.value = '';
+  }
+
+  resolvedImageFieldState = {
+    source: null,
+    value: null,
+    newsUrl: null
+  };
+}
+
+function setExtractedImageFieldValue(value, sourceNewsUrl) {
+  customImageUrl.value = value;
+  resolvedImageFieldState = {
+    source: 'extracted',
+    value,
+    newsUrl: sourceNewsUrl
   };
 }
 
@@ -219,6 +258,10 @@ function setupEventListeners() {
     }
   });
 
+  newsUrl.addEventListener('input', () => {
+    clearResolvedImageFieldState({ clearMatchingField: true });
+  });
+
   if (fetchDataBtn) {
     fetchDataBtn.addEventListener('click', handleFetchNewsAndPreview);
   }
@@ -243,6 +286,7 @@ function setupEventListeners() {
 
   if (customImageUrl) {
     customImageUrl.addEventListener('input', () => {
+      clearResolvedImageFieldState();
       updatePreview().catch(() => {});
     });
   }
@@ -352,6 +396,7 @@ function openModal(templateKey) {
   lastNewsUrl = null;
   currentManifestData = null;
   previewInitializedTemplate = null;
+  clearResolvedImageFieldState();
 
   if (templateData && Array.isArray(templateData.themes) && templateData.themes.length) {
     const defaultTheme = templateData.defaultTheme || templateData.themes[0].id;
@@ -411,6 +456,7 @@ function closeModalHandler() {
   lastNewsUrl = null;
   currentManifestData = null;
   previewInitializedTemplate = null;
+  clearResolvedImageFieldState();
 
   if (customTheme) {
     customTheme.innerHTML = '';
@@ -429,6 +475,7 @@ async function loadManifest(template, page = 'index') {
     return lastNewsData;
   }
 
+  clearResolvedImageFieldState({ clearMatchingField: true });
   const data = (await window.Api.extractNewsData(url)) || {};
   lastNewsUrl = url;
   lastNewsData = data;
@@ -481,7 +528,7 @@ async function handleFetchNewsAndPreview() {
       customTag.value = extractedData.chapeu;
     }
     if (!currentFormData.manualImage && extractedData.bg) {
-      customImageUrl.value = extractedData.bg;
+      setExtractedImageFieldValue(extractedData.bg, url);
     }
 
     await updatePreview();
@@ -808,7 +855,7 @@ async function updatePreview(backgroundOverride = null) {
 async function generateArtWithPreviewFlow() {
   const formData = readGenerationFormData();
   const url = formData.newsUrl;
-  const imageOverride = formData.manualImage;
+  const imageOverride = formData.manualImage || formData.resolvedImage;
 
   const inputValidation = validateGenerationInput(formData);
   if (!applyGenerationValidation(inputValidation)) {
@@ -848,6 +895,16 @@ async function generateArtWithPreviewFlow() {
     const exportBg = /^https?:\/\//i.test(effectiveBg)
       ? await window.Api.embedImage(effectiveBg)
       : effectiveBg;
+
+    if (!isValidResolvedImageValue(exportBg)) {
+      applyGenerationValidation({
+        valid: false,
+        code: 'IMAGE_REQUIRED',
+        message: 'Não encontramos uma imagem válida. Informe um link de imagem ou tente novamente.',
+        focusField: 'customImageUrl'
+      });
+      return;
+    }
 
     await updatePreview(exportBg);
     await window.PreviewExport.downloadPreview(

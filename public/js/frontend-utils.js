@@ -24,6 +24,19 @@
     }
   }
 
+  function isValidRemoteImageUrl(value) {
+    return isHttpUrl(value);
+  }
+
+  function isValidResolvedImageValue(value) {
+    const normalizedValue = normalizeOptionalValue(value);
+    if (isValidRemoteImageUrl(normalizedValue)) return true;
+
+    return /^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      normalizedValue
+    ) && !normalizedValue.endsWith(',');
+  }
+
   function validateGenerationInput(input = {}) {
     const {
       template,
@@ -61,7 +74,7 @@
       };
     }
 
-    if (manualImage && !isHttpUrl(manualImage)) {
+    if (manualImage && !isValidRemoteImageUrl(manualImage)) {
       return {
         valid: false,
         code: 'MANUAL_IMAGE_URL_INVALID',
@@ -79,7 +92,7 @@
       };
     }
 
-    if (requireResolvedContent && !effectiveImage) {
+    if (requireResolvedContent && !isValidResolvedImageValue(effectiveImage)) {
       return {
         valid: false,
         code: 'IMAGE_REQUIRED',
@@ -120,6 +133,8 @@
     buildExportFilename,
     getToastIcon,
     isHttpUrl,
+    isValidRemoteImageUrl,
+    isValidResolvedImageValue,
     normalizeOptionalValue,
     validateGenerationInput
   };

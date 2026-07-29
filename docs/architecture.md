@@ -193,9 +193,9 @@ de imagem em HTTP e contém a função privada `embedImage`.
 - `embedImage` solicita ao backend uma data URL e propaga uma mensagem de erro.
 
 `public/js/frontend-utils.js` expõe `window.FrontendUtils` e concentra
-validação de URL HTTP/HTTPS, normalização de valores opcionais, escolha do
-ícone dos toasts e construção do nome do PNG. As funções não acessam o DOM e
-também são exportadas para testes unitários.
+validação de URL HTTP/HTTPS, validação da imagem efetiva, normalização de
+valores opcionais, escolha do ícone dos toasts e construção do nome do PNG. As
+funções não acessam o DOM e também são exportadas para testes unitários.
 
 `public/script.js` mantém o catálogo visível, o estado global da tela e a
 orquestração dos fluxos. Ele também gera como string o runtime de bindings
@@ -216,6 +216,24 @@ entrada. A segunda ocorre depois da extração e verifica categoria e imagem
 efetivas. `applyGenerationValidation` traduz o resultado inválido em toast e
 foco no campo indicado. A precedência dos valores manuais sobre os extraídos
 permanece a mesma nas duas fases e na montagem do preview.
+
+Os contratos de imagem dessas fases são distintos. `isValidRemoteImageUrl`
+aceita somente HTTP e HTTPS e é usado para a imagem digitada manualmente.
+`isValidResolvedImageValue` aceita HTTP/HTTPS ou uma data URL Base64 de PNG,
+JPEG, GIF ou WebP, formato que o backend produz depois de validar e incorporar
+a imagem. Data URLs não pertencem ao contrato da entrada manual; SVG, MIME
+genérico, payload vazio e formatos sem o marcador `;base64,` não pertencem ao
+contrato da imagem resolvida.
+
+O campo de imagem pode ser preenchido pelo usuário ou por
+`handleFetchNewsAndPreview`. Quando a extração preenche o campo, o frontend
+registra a origem `extracted` junto com o valor exato em
+`resolvedImageFieldState`. O snapshot da geração só expõe esse conteúdo como
+`resolvedImage` enquanto origem e valor ainda correspondem ao campo; caso
+contrário, ele é `manualImage`. Um evento `input` invalida imediatamente a
+origem automática. Troca de URL, abertura de outro template e fechamento do
+modal também limpam esse estado, impedindo que uma associação antiga seja
+reutilizada.
 
 `public/js/preview-export.js` expõe `window.PreviewExport`. O módulo espera
 fontes e imagens, verifica imagens HTTP(S), chama `html-to-image` dentro do
@@ -329,10 +347,12 @@ depende de CORS durante a captura.
 
 ### Imagem manual
 
-O preview usa diretamente a URL digitada no campo manual. Na geração, se a
-imagem efetiva ainda for HTTP(S), o frontend chama
+O campo manual aceita somente uma URL HTTP ou HTTPS; data URLs e outros
+protocolos são rejeitados antes dos efeitos assíncronos. O preview usa
+diretamente essa URL. Na geração, se a imagem efetiva ainda for HTTP(S), o frontend chama
 `POST /api/news/embed-image`; a data URL retornada é aplicada novamente ao
-preview como `backgroundOverride` antes da captura.
+preview como `backgroundOverride` antes da captura. Antes dessa aplicação, o
+retorno também precisa satisfazer o contrato de imagem resolvida.
 
 `preview-export.js` também percorre elementos `img` do documento e faz
 requisições CORS para URLs HTTP(S) remanescentes. Uma falha interrompe a
@@ -470,9 +490,11 @@ de URL participam de `buildPreviewData`. Isso impede que o cache de uma notícia
 anterior seja usado após a URL ser editada.
 
 Há uma diferença importante entre origem e conteúdo dos campos: depois de
-“Buscar dados”, valores extraídos são copiados para os inputs manuais vazios.
-A partir daí, o preview os trata como valores manuais. Uma nova extração não
-sobrescreve inputs que já estejam preenchidos.
+“Buscar dados”, valores textuais extraídos são copiados para os inputs manuais
+vazios. Para a imagem, o frontend preserva separadamente a origem extraída,
+associada ao valor exato e à URL da notícia. Uma edição do campo invalida essa
+associação e faz o novo conteúdo seguir o contrato manual. Uma nova extração
+não sobrescreve inputs que já contenham um valor manual.
 
 ## Estado global do frontend
 

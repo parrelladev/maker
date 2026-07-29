@@ -201,6 +201,7 @@ describe('contrato de estado de public/script.js', () => {
       manualSubtitle: 'Subtítulo manual',
       manualCategory: 'Categoria manual',
       manualImage: 'imagem-manual',
+      resolvedImage: '',
       theme: 'rosa',
       template: 'layout-hz'
     });
@@ -547,7 +548,7 @@ describe('validacoes atuais da geracao', () => {
       chapeu: 'Categoria extraida',
       bg: 'https://example.com/extraida.jpg'
     });
-    harness.context.Api.embedImage.mockResolvedValue('data:image/png;base64,MANUAL');
+    harness.context.Api.embedImage.mockResolvedValue('data:image/png;base64,TUFOVUFM');
 
     await harness.run('generateArtWithPreviewFlow()');
 
@@ -555,8 +556,8 @@ describe('validacoes atuais da geracao', () => {
       .toHaveBeenCalledWith('https://example.com/manual.jpg');
     expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({
       tag: 'Categoria manual',
-      bg: 'data:image/png;base64,MANUAL',
-      resolvedBg: 'data:image/png;base64,MANUAL'
+      bg: 'data:image/png;base64,TUFOVUFM',
+      resolvedBg: 'data:image/png;base64,TUFOVUFM'
     }));
     expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledWith(
       harness.elements.previewFrame,
@@ -565,6 +566,191 @@ describe('validacoes atuais da geracao', () => {
     );
     expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
     expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('gera com data URL JPEG extraida e usa a mesma imagem no preview exportado', async () => {
+    const harness = createHarness();
+    const updatePreview = jest.fn();
+    const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: embeddedImage
+    });
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({
+      tag: 'Cotidiano',
+      bg: embeddedImage,
+      resolvedBg: embeddedImage
+    }));
+    expect(harness.context.Api.embedImage).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledWith(
+      harness.elements.previewFrame,
+      expect.anything(),
+      'agazeta-foto-abaixo-index.png'
+    );
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.elements.toastContainer.children[0].innerHTML)
+      .not.toContain('Informe um link de imagem v\u00e1lido (http ou https).');
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('gera depois que a busca preenche o campo de imagem com data URL JPEG extraida', async () => {
+    const harness = createHarness();
+    const updatePreview = jest.fn();
+    const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: embeddedImage
+    });
+
+    await harness.run('handleFetchNewsAndPreview()');
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.customImageUrl.value).toBe(embeddedImage);
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .not.toContain('Informe um link de imagem v\u00e1lido (http ou https).');
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('reutiliza a imagem extraida do cache em geracoes sucessivas', async () => {
+    const harness = createHarness();
+    const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: embeddedImage
+    });
+
+    await harness.run('handleFetchNewsAndPreview()');
+    await harness.run('generateArtWithPreviewFlow()');
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.extractNewsData).toHaveBeenCalledTimes(1);
+    expect(harness.context.Api.embedImage).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(2);
+  });
+
+  test('editar data URL extraida invalida sua origem automatica e bloqueia a geracao', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: 'data:image/jpeg;base64,/9j/AA=='
+    });
+
+    await harness.run('handleFetchNewsAndPreview()');
+    harness.elements.customImageUrl.value = 'data:image/jpeg;base64,/9j/BB==';
+    harness.elements.customImageUrl.dispatch('input');
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('Informe um link de imagem v\u00e1lido (http ou https).');
+    expect(harness.elements.customImageUrl.focus).toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test('editar imagem extraida para HTTP usa o fluxo manual e valida o JPEG incorporado', async () => {
+    const harness = createHarness();
+    const embeddedManualImage = 'data:image/jpeg;base64,/9j/TUFOVUFM';
+    const updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: 'data:image/jpeg;base64,/9j/AA=='
+    });
+    harness.context.Api.embedImage.mockResolvedValue(embeddedManualImage);
+
+    await harness.run('handleFetchNewsAndPreview()');
+    harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
+    harness.elements.customImageUrl.dispatch('input');
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.context.Api.embedImage)
+      .toHaveBeenCalledWith('https://example.com/manual.jpg');
+    expect(updatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
+      bg: embeddedManualImage,
+      resolvedBg: embeddedManualImage
+    }));
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalled();
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('fechar e abrir outro template elimina a origem automatica anterior', async () => {
+    const harness = createHarness();
+    const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: embeddedImage
+    });
+
+    await harness.run('handleFetchNewsAndPreview()');
+    harness.run(`closeModalHandler(); openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/outra-noticia';
+    harness.elements.customImageUrl.value = embeddedImage;
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('Informe um link de imagem v\u00e1lido (http ou https).');
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test('alterar a URL da noticia limpa a imagem automatica associada ao cache anterior', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Cotidiano',
+      bg: 'data:image/jpeg;base64,/9j/AA=='
+    });
+
+    await harness.run('handleFetchNewsAndPreview()');
+    harness.elements.newsUrl.value = 'https://example.com/outra-noticia';
+    harness.elements.newsUrl.dispatch('input');
+
+    expect(harness.elements.customImageUrl.value).toBe('');
+    expect(harness.run('readGenerationFormData()')).toMatchObject({
+      newsUrl: 'https://example.com/outra-noticia',
+      manualImage: '',
+      resolvedImage: ''
+    });
+  });
+
+  test('rejeita data URL JPEG digitada diretamente como imagem manual', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.elements.customImageUrl.value = 'data:image/jpeg;base64,/9j/AA==';
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.elements.toastContainer.children[0].innerHTML)
+      .toContain('Informe um link de imagem v\u00e1lido (http ou https).');
+    expect(harness.elements.customImageUrl.focus).toHaveBeenCalledTimes(1);
+    expect(harness.loadManifest).not.toHaveBeenCalled();
+    expect(harness.extractNewsData).not.toHaveBeenCalled();
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).not.toBe(true);
   });
 });
 
