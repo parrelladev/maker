@@ -111,7 +111,23 @@ resolvidos.
 - imagem local não SVG é localizada em `input`;
 - nomes sem extensão são procurados nas extensões suportadas;
 - dados estáveis dos resultados são guardados no `LOGO_CACHE`, indexado pelo
-  valor original; o texto alternativo é aplicado separadamente a cada chamada.
+  valor original; o texto alternativo é aplicado separadamente a cada chamada;
+- valores ausentes, logos locais não encontradas, respostas remotas inválidas e
+  erros de download não entram no cache. Uma chamada posterior tenta resolver
+  o asset novamente.
+
+A chave do `LOGO_CACHE` é o `manifest.defaultLogo` carregado pelo serviço de
+páginas. O cache mantém no máximo 32 resoluções bem-sucedidas. Ao inserir uma
+nova chave no limite, remove a chave inserida há mais tempo (FIFO); consultar uma
+chave existente não altera essa ordem. Não há TTL nem invalidação quando um
+manifest ou asset muda no filesystem.
+
+Os parâmetros `template` e `page` da rota ainda não são confinados a
+`TEMPLATE_ROOT`. Parâmetros codificados podem selecionar caminhos fora dessa
+raiz e, consequentemente, manifests que não pertencem ao catálogo normal. O
+limite do cache reduz o impacto desse caminho sobre memória, mas não corrige a
+travessia de diretórios, que permanece uma tarefa de segurança separada e
+prioritária.
 
 `src/lib/safeHttpClient.js` centraliza os downloads feitos pelo servidor. Antes
 da conexão, valida protocolo e credenciais, resolve e fixa o endereço DNS e
@@ -456,8 +472,10 @@ As variáveis a seguir vivem no escopo global de `public/script.js`:
 
 O arquivo também conserva referências globais aos elementos do DOM. Em
 `api.js`, `manifestCache` é estado persistente privado da IIFE, indexado por
-template e página. No backend, `LOGO_CACHE` persiste no processo e é indexado
-pelo valor da logo. O cache não inclui o texto alternativo recebido na chamada.
+template e página e preenchido somente após uma resposta bem-sucedida. No
+backend, `LOGO_CACHE` persiste no processo e é indexado pelo valor da logo
+declarado em manifest local. O cache não inclui o texto alternativo recebido na
+chamada nem resultados nulos ou falhas de resolução.
 
 Abrir ou fechar o modal limpa os estados da notícia e do preview. Trocar tema
 preserva o template e os dados e solicita uma atualização do preview.
@@ -527,7 +545,10 @@ No frontend:
   de requisição; respostas atrasadas podem atualizar o estado depois de uma
   mudança de URL ou template.
 - Os caches do frontend e do backend persistem no escopo do módulo/processo e
-  não têm API de limpeza.
+  não têm API de limpeza ou invalidação. O cache de logos limita-se a 32
+  entradas com descarte FIFO; alterações de manifest ou asset durante a
+  execução só são observadas depois de reiniciar o processo e recarregar a
+  página.
 - Os manifests atuais não exercitam todos os tipos aceitos pelo runtime.
 - A suíte automatizada cobre rotas HTTP, carregamento de templates, requisições
   externas simuladas e o cliente HTTP seguro, mas não cobre precedência,

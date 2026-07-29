@@ -13,9 +13,11 @@ const { SafeHttpError } = jest.requireActual('./safeHttpClient');
 
 function loadResolver() {
   jest.resetModules();
+  const assetResolver = require('./assetResolver');
   return {
     safeHttpClient: require('./safeHttpClient'),
-    resolveLogoAsset: require('./assetResolver').resolveLogoAsset,
+    createLogoAssetResolver: assetResolver.createLogoAssetResolver,
+    resolveLogoAsset: assetResolver.resolveLogoAsset,
   };
 }
 
@@ -90,6 +92,36 @@ describe('resolveLogoAsset com SVG remoto simulado', () => {
     await expect(resolveLogoAsset(publicUrl)).rejects.toBe(error);
     expect(currentClient.get.mock.calls[0][1].timeout).toBe(10000);
   });
+
+  test('tenta novamente após erro remoto temporário em vez de manter cache negativo', async () => {
+    const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();
+    currentClient.get
+      .mockRejectedValueOnce(new SafeHttpError('TIMEOUT'))
+      .mockResolvedValueOnce(svgResponse());
+
+    await expect(resolveLogoAsset(publicUrl)).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await expect(resolveLogoAsset(publicUrl)).resolves.toMatchObject({
+      kind: 'inline-svg',
+      source: publicUrl,
+    });
+    expect(currentClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  test.each(['TIMEOUT', 'BLOCKED_ADDRESS'])(
+    'não adiciona erro remoto %s ao cache controlado',
+    async (code) => {
+      const {
+        safeHttpClient: currentClient,
+        createLogoAssetResolver,
+      } = loadResolver();
+      const cache = new Map();
+      const resolveWithCache = createLogoAssetResolver({ cache, capacity: 2 });
+      currentClient.get.mockRejectedValue(new SafeHttpError(code));
+
+      await expect(resolveWithCache(publicUrl)).rejects.toMatchObject({ code });
+      expect(cache.size).toBe(0);
+    }
+  );
 
   test('rejeita SVG acima de 1 MB', async () => {
     const { safeHttpClient: currentClient, resolveLogoAsset } = loadResolver();

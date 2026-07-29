@@ -7,6 +7,7 @@ const { assertContentType } = safeHttpClient;
 
 const INPUT_DIR = path.resolve('input');
 const LOGO_EXTENSIONS = ['.svg', '.png', '.jpg', '.jpeg', '.webp'];
+const LOGO_CACHE_CAPACITY = 32;
 const LOGO_CACHE = new Map();
 
 function isRemoteUrl(value) {
@@ -23,15 +24,6 @@ function createImageAsset(src, source, sourceType) {
 
 function withAltText(asset, altText) {
   return { ...asset, alt: altText };
-}
-
-function getCachedAsset(value) {
-  return LOGO_CACHE.get(value);
-}
-
-function cacheAsset(value, asset) {
-  LOGO_CACHE.set(value, asset);
-  return asset;
 }
 
 async function loadRemoteSvg(value) {
@@ -92,24 +84,46 @@ async function resolveLocalAsset(value) {
   return createImageAsset(candidatePath, candidatePath, 'local');
 }
 
-async function resolveLogoAsset(value, altText) {
-  if (!value) {
-    return null;
+function createLogoAssetResolver({
+  cache = new Map(),
+  capacity = LOGO_CACHE_CAPACITY,
+} = {}) {
+  function cacheAsset(value, asset) {
+    if (!cache.has(value) && cache.size >= capacity) {
+      cache.delete(cache.keys().next().value);
+    }
+    cache.set(value, asset);
+    return asset;
   }
 
-  const cachedAsset = getCachedAsset(value);
-  if (cachedAsset) {
-    return withAltText(cachedAsset, altText);
+  async function resolveLogoAsset(value, altText) {
+    if (!value) {
+      return null;
+    }
+
+    const cachedAsset = cache.get(value);
+    if (cachedAsset) {
+      return withAltText(cachedAsset, altText);
+    }
+
+    const asset = isRemoteUrl(value)
+      ? await resolveRemoteAsset(value)
+      : await resolveLocalAsset(value);
+
+    return withAltText(cacheAsset(value, asset), altText);
   }
 
-  const asset = isRemoteUrl(value)
-    ? await resolveRemoteAsset(value)
-    : await resolveLocalAsset(value);
-
-  return withAltText(cacheAsset(value, asset), altText);
+  return resolveLogoAsset;
 }
 
+const resolveLogoAsset = createLogoAssetResolver({
+  cache: LOGO_CACHE,
+  capacity: LOGO_CACHE_CAPACITY,
+});
+
 module.exports = {
+  LOGO_CACHE_CAPACITY,
+  createLogoAssetResolver,
   resolveLogoAsset,
 };
 

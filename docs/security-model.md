@@ -205,6 +205,14 @@ Como o manifest vem do filesystem local, esse fluxo depende de alguém com
 capacidade de alterar conteúdo implantado. Ainda assim, o destino é externo e
 usa a rede do servidor.
 
+Os parâmetros `template` e `page` ainda não são confinados a `TEMPLATE_ROOT`.
+Parâmetros com separadores codificados podem alcançar caminhos fora da raiz e
+carregar manifests locais que não pertencem ao catálogo. Essa é uma
+**vulnerabilidade confirmada pelo código** e exige uma tarefa de segurança
+separada e prioritária para resolver, normalizar e validar o caminho final antes
+de qualquer leitura. A política limitada do cache de logos não corrige nem
+mitiga o acesso indevido ao filesystem.
+
 ## Requisições externas realizadas pelo servidor
 
 | Local | Origem da URL | Timeout | Limite de resposta | Redirects | Tipo |
@@ -374,9 +382,11 @@ essa URL ao elemento de imagem ou a `backgroundImage`, e o navegador passa a
 ser responsável pela requisição. Esse fluxo expõe o cliente à origem remota e
 não recebe os limites de timeout e tamanho de `embedImage`.
 
-O cache de logos não possui expiração ou limite. Como os manifests são locais e
-finitos na operação normal, o crescimento tende a acompanhar esses valores;
-isso muda se conteúdo local puder ser alterado dinamicamente.
+O cache de logos não possui expiração, mas mantém no máximo 32 resoluções
+bem-sucedidas e descarta a entrada mais antiga ao inserir uma nova chave no
+limite. Valores ausentes, assets inválidos e falhas locais ou remotas não criam
+cache negativo. Não existe invalidação quando um manifest ou asset muda durante
+a execução.
 
 ## Uso de `innerHTML`
 

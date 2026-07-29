@@ -178,10 +178,15 @@ A suíte de `src/lib/assetResolver.external.test.js` caracteriza SVG remoto com
 o cliente compartilhado mockado. Ela registra timeout, limite de resposta e
 redirects configurados, exigência de `image/svg+xml` e bloqueio de destinos não
 públicos. Também verifica remoção de scripts, `foreignObject`, handlers e URLs
-perigosas, além da rejeição de XML malformado.
+perigosas, rejeição de XML malformado, ausência de cache negativo para timeout
+e outro erro remoto classificado e nova tentativa depois de falha temporária.
 
 A suíte de `src/lib/assetResolver.local.test.js` confirma que SVG local também
-é sanitizado e que arquivos acima de 1 MB são rejeitados antes da leitura.
+é sanitizado e que arquivos acima de 1 MB são rejeitados antes da leitura. Um
+cache injetado demonstra o limite de capacidade, descarte FIFO, ausência de
+promoção em hits, reutilização das entradas recentes, ausência de cache negativo
+para valores ausentes ou inválidos, logo inexistente e SVG inválido, além do
+isolamento de `altText` por chamada.
 
 A suíte de `src/lib/imageValidator.test.js` cobre assinaturas reconhecidas de
 PNG, JPEG, GIF e WebP, parâmetros no MIME, tipos ausentes, genéricos ou
@@ -243,7 +248,7 @@ para a rota.
 | `src/server.js` | `app`, middleware global e guard do entrypoint | importação sem listener, uso HTTP, interface, erros públicos, delegação após `headersSent` e inicialização direta |
 | `src/routes/templates.js` | rotas de listagem e carregamento | manifest válido, ausente e inválido; HTML e CSS; logo local e ausente; caminhos inexistentes; arquivo obrigatório ilegível; falha de asset remoto; erro inesperado; e erros públicos sem detalhes internos |
 | `src/lib/manifestLoader.js` | `inspectTemplateCatalog`, `listTemplates` e `loadManifest` | descoberta, diagnósticos internos, filtragem, parsing e validação dos arquivos mínimos |
-| `src/lib/assetResolver.js` | `resolveLogoAsset` | SVG local, imagem local e remota, ordem de extensões, cache sem compartilhamento de texto alternativo, fallback de logo ausente e download SVG remoto simulado |
+| `src/lib/assetResolver.js` | `createLogoAssetResolver` e `resolveLogoAsset` | SVG local, imagem local e remota, ordem de extensões, capacidade máxima, descarte FIFO, ausência de cache negativo, retry após falhas e cache sem compartilhamento de texto alternativo |
 | `src/lib/imageValidator.js` | `validateImageResponse` | allowlist de MIME, corpo binário, tamanho, vazio e assinaturas básicas |
 | `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
 | `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, contrato Axios e conexão local real |
@@ -275,7 +280,9 @@ de cobertura.
 - resolução de `PORT` e `config.js`;
 - ordem completa dos middlewares e caminhos negativos de arquivos estáticos;
 - redirects reais, respostas comprimidas e streams interrompidos;
-- cache de logos;
+- invalidação do cache de logos após mudança de arquivo;
+- concorrência de resoluções iguais, TTL, cache distribuído e comportamento
+  após reinicialização do processo;
 
 ### Frontend
 
@@ -346,16 +353,9 @@ Comando:
 npm.cmd test
 ```
 
-Resultado observado:
-
-```text
-Test Suites: 11 passed, 11 total
-Tests:       226 passed, 226 total
-Snapshots:   0 total
-```
-
-Todos os 226 testes existentes passaram. Uma requisição controlada usa a pilha
-Axios/lookup/socket local; nenhuma chamada à internet é realizada.
+Resultado observado: todas as suítes e testes existentes passaram. Uma
+requisição controlada usa a pilha Axios/lookup/socket local; nenhuma chamada à
+internet é realizada.
 
 O guard do entrypoint permite importar a aplicação sem abrir a porta configurada.
 Os testes HTTP usam portas efêmeras e encerram seus servidores e processos.
