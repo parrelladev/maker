@@ -205,6 +205,18 @@ executado no `iframe`.
 dos estados atuais de tema e template em um snapshot normalizado, sem alterar
 esses estados.
 
+`validateGenerationInput`, em `public/js/frontend-utils.js`, recebe o snapshot
+normalizado da entrada e concentra as regras puras da geração. Seu resultado
+estruturado contém `valid`, `code`, `message` e `focusField`; esses códigos são
+detalhes internos do frontend, não uma API pública versionada.
+
+`generateArtWithPreviewFlow` mantém a validação em duas fases. A primeira ocorre
+antes dos efeitos assíncronos e verifica as pré-condições disponíveis na
+entrada. A segunda ocorre depois da extração e verifica categoria e imagem
+efetivas. `applyGenerationValidation` traduz o resultado inválido em toast e
+foco no campo indicado. A precedência dos valores manuais sobre os extraídos
+permanece a mesma nas duas fases e na montagem do preview.
+
 `public/js/preview-export.js` expõe `window.PreviewExport`. O módulo espera
 fontes e imagens, verifica imagens HTTP(S), chama `html-to-image` dentro do
 `iframe` e inicia o download por meio de um link temporário.
@@ -396,13 +408,13 @@ do elemento `html`. Todos declaram dimensões de 1080 × 1920. O runtime suporta
 mais tipos de binding do que os manifests atuais exercitam.
 
 O atributo `required` presente em alguns bindings é enviado ao frontend, mas o
-runtime não o interpreta. As validações de categoria e imagem na geração estão
-codificadas em `generateArtWithPreviewFlow`.
+runtime não o interpreta. Categoria e imagem efetivas são pré-condições da
+segunda fase de `validateGenerationInput`, executada depois da extração.
 
 ## Exportação para PNG
 
-`generateArtWithPreviewFlow` valida template, URL da notícia e URL manual,
-mostra o loading e então:
+`generateArtWithPreviewFlow` executa a primeira fase de validação antes de
+mostrar o loading e então:
 
 1. carrega novamente os dados do template, usando o cache de `Api`;
 2. obtém ou reutiliza a extração associada à URL atual;

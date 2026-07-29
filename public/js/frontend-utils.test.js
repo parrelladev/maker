@@ -2,7 +2,8 @@ const {
   buildExportFilename,
   getToastIcon,
   isHttpUrl,
-  normalizeOptionalValue
+  normalizeOptionalValue,
+  validateGenerationInput
 } = require('./frontend-utils');
 
 describe('frontend-utils', () => {
@@ -51,5 +52,77 @@ describe('frontend-utils', () => {
     );
     expect(buildExportFilename('', '')).toBe('arte-index.png');
     expect(buildExportFilename('...', '.')).toBe('arte-index.png');
+  });
+
+  describe('validateGenerationInput', () => {
+    const validInput = {
+      template: 'layout-hz',
+      newsUrl: 'https://example.com/noticia',
+      manualImage: ''
+    };
+
+    test.each([
+      [{}, 'TEMPLATE_REQUIRED', 'Escolha um template antes de gerar a arte', null],
+      [
+        { template: 'layout-hz' },
+        'NEWS_URL_REQUIRED',
+        'Por favor, insira o link da notícia',
+        'newsUrl'
+      ],
+      [
+        { template: 'layout-hz', newsUrl: 'notícia inválida' },
+        'NEWS_URL_INVALID',
+        'Por favor, insira um link válido',
+        'newsUrl'
+      ],
+      [
+        { ...validInput, manualImage: 'imagem inválida' },
+        'MANUAL_IMAGE_URL_INVALID',
+        'Informe um link de imagem válido (http ou https).',
+        'customImageUrl'
+      ],
+      [
+        { ...validInput, requireResolvedContent: true, effectiveImage: 'data:image/png;base64,AA==' },
+        'CATEGORY_REQUIRED',
+        'Por favor, insira a categoria da notícia',
+        'customTag'
+      ],
+      [
+        { ...validInput, requireResolvedContent: true, resolvedCategory: 'Categoria' },
+        'IMAGE_REQUIRED',
+        'Não encontramos uma imagem válida. Informe um link de imagem ou tente novamente.',
+        'customImageUrl'
+      ]
+    ])('retorna resultado estruturado para a falha %#', (input, code, message, focusField) => {
+      expect(validateGenerationInput(input)).toEqual({
+        valid: false,
+        code,
+        message,
+        focusField
+      });
+    });
+
+    test('não exige conteúdo resolvido durante as pré-condições iniciais', () => {
+      expect(validateGenerationInput(validInput)).toEqual({
+        valid: true,
+        code: null,
+        message: null,
+        focusField: null
+      });
+    });
+
+    test('aceita todos os dados efetivos necessários para gerar', () => {
+      expect(validateGenerationInput({
+        ...validInput,
+        requireResolvedContent: true,
+        resolvedCategory: 'Categoria',
+        effectiveImage: 'data:image/png;base64,AA=='
+      })).toEqual({
+        valid: true,
+        code: null,
+        message: null,
+        focusField: null
+      });
+    });
   });
 });

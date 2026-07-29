@@ -445,6 +445,129 @@ describe('contrato de estado de public/script.js', () => {
   });
 });
 
+describe('validacoes atuais da geracao', () => {
+  test.each([
+    {
+      name: 'template ausente',
+      prepare: () => {},
+      message: 'Escolha um template antes de gerar a arte',
+      focusField: null
+    },
+    {
+      name: 'URL da noticia ausente',
+      prepare: harness => harness.run(`openModal('layout-hz')`),
+      message: 'Por favor, insira o link da not\u00edcia',
+      focusField: 'newsUrl'
+    },
+    {
+      name: 'URL da noticia invalida',
+      prepare: harness => {
+        harness.run(`openModal('layout-hz')`);
+        harness.elements.newsUrl.value = 'noticia invalida';
+      },
+      message: 'Por favor, insira um link v\u00e1lido',
+      focusField: 'newsUrl'
+    },
+    {
+      name: 'imagem manual invalida',
+      prepare: harness => {
+        harness.run(`openModal('layout-hz')`);
+        harness.elements.newsUrl.value = 'https://example.com/noticia';
+        harness.elements.customImageUrl.value = 'imagem invalida';
+      },
+      message: 'Informe um link de imagem v\u00e1lido (http ou https).',
+      focusField: 'customImageUrl'
+    }
+  ])('bloqueia $name antes de iniciar efeitos assincronos', async ({
+    prepare,
+    message,
+    focusField
+  }) => {
+    const harness = createHarness();
+    prepare(harness);
+    Object.values(harness.elements).forEach(element => element.focus.mockClear());
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.elements.toastContainer.children[0].innerHTML).toContain(message);
+    expect(harness.loadManifest).not.toHaveBeenCalled();
+    expect(harness.extractNewsData).not.toHaveBeenCalled();
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).not.toBe(true);
+    if (focusField) {
+      expect(harness.elements[focusField].focus).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test.each([
+    {
+      name: 'categoria efetiva ausente',
+      extractedData: { bg: 'data:image/png;base64,AA==' },
+      message: 'Por favor, insira a categoria da not\u00edcia',
+      focusField: 'customTag'
+    },
+    {
+      name: 'imagem efetiva ausente',
+      extractedData: { chapeu: 'Categoria extra\u00edda' },
+      message: 'N\u00e3o encontramos uma imagem v\u00e1lida. Informe um link de imagem ou tente novamente.',
+      focusField: 'customImageUrl'
+    }
+  ])('bloqueia $name apos a extracao e restaura o loading', async ({
+    extractedData,
+    message,
+    focusField
+  }) => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue(extractedData);
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.loadManifest).toHaveBeenCalledWith('layout-hz', 'index');
+    expect(harness.extractNewsData).toHaveBeenCalledWith('https://example.com/noticia');
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.elements.toastContainer.children[0].innerHTML).toContain(message);
+    expect(harness.elements[focusField].focus).toHaveBeenCalledTimes(1);
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test('preserva dados manuais no preview exportado durante uma geracao valida', async () => {
+    const harness = createHarness();
+    const updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.elements.customTag.value = 'Categoria manual';
+    harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria extraida',
+      bg: 'https://example.com/extraida.jpg'
+    });
+    harness.context.Api.embedImage.mockResolvedValue('data:image/png;base64,MANUAL');
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.context.Api.embedImage)
+      .toHaveBeenCalledWith('https://example.com/manual.jpg');
+    expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({
+      tag: 'Categoria manual',
+      bg: 'data:image/png;base64,MANUAL',
+      resolvedBg: 'data:image/png;base64,MANUAL'
+    }));
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledWith(
+      harness.elements.previewFrame,
+      expect.anything(),
+      expect.any(String)
+    );
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+});
+
 describe('contratos das transformações usadas por public/script.js', () => {
   test.each([
     ['http://example.com/noticia', true],

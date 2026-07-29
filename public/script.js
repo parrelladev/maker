@@ -89,7 +89,8 @@ const {
   buildExportFilename,
   getToastIcon,
   isHttpUrl,
-  normalizeOptionalValue
+  normalizeOptionalValue,
+  validateGenerationInput
 } = window.FrontendUtils;
 
 const templateLookup = Object.fromEntries(storyTemplates.map(template => [template.id, template]));
@@ -809,26 +810,8 @@ async function generateArtWithPreviewFlow() {
   const url = formData.newsUrl;
   const imageOverride = formData.manualImage;
 
-  if (!formData.template) {
-    showToast('Escolha um template antes de gerar a arte', 'error');
-    return;
-  }
-
-  if (!url) {
-    showToast('Por favor, insira o link da notícia', 'error');
-    newsUrl.focus();
-    return;
-  }
-
-  if (!isHttpUrl(url)) {
-    showToast('Por favor, insira um link válido', 'error');
-    newsUrl.focus();
-    return;
-  }
-
-  if (imageOverride && !isHttpUrl(imageOverride)) {
-    showToast('Informe um link de imagem válido (http ou https).', 'error');
-    customImageUrl.focus();
+  const inputValidation = validateGenerationInput(formData);
+  if (!applyGenerationValidation(inputValidation)) {
     return;
   }
 
@@ -851,15 +834,13 @@ async function generateArtWithPreviewFlow() {
     const resolvedChapeu = manualTag || extractedChapeu || '';
     const effectiveBg = imageOverride || extractedData.bg || null;
 
-    if (!resolvedChapeu) {
-      showToast('Por favor, insira a categoria da notícia', 'error');
-      customTag.focus();
-      return;
-    }
-
-    if (!effectiveBg) {
-      showToast('Não encontramos uma imagem válida. Informe um link de imagem ou tente novamente.', 'error');
-      customImageUrl.focus();
+    const resolvedContentValidation = validateGenerationInput({
+      ...formData,
+      requireResolvedContent: true,
+      resolvedCategory: resolvedChapeu,
+      effectiveImage: effectiveBg
+    });
+    if (!applyGenerationValidation(resolvedContentValidation)) {
       return;
     }
 
@@ -882,6 +863,24 @@ async function generateArtWithPreviewFlow() {
   } finally {
     hideLoading();
   }
+}
+
+function applyGenerationValidation(validation) {
+  if (validation.valid) return true;
+
+  showToast(validation.message, 'error');
+
+  const focusTargets = {
+    newsUrl,
+    customImageUrl,
+    customTag
+  };
+  const focusTarget = focusTargets[validation.focusField];
+  if (focusTarget) {
+    focusTarget.focus();
+  }
+
+  return false;
 }
 
 function showLoading() {

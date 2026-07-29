@@ -105,9 +105,11 @@ Não há configuração de limite mínimo de cobertura, snapshots ou setup globa
 
 ## Testes existentes
 
-Existem onze arquivos:
+Existem treze arquivos:
 
 ```text
+public/script.test.js
+public/js/frontend-utils.test.js
 src/server.test.js
 src/routes/templates.test.js
 src/routes/news.external.test.js
@@ -239,6 +241,28 @@ logos SVG e de imagem local ou remota,
 ausência de CSS e logo, fallback com warning e propagação de falha do manifest
 para a rota.
 
+A suíte de `public/script.test.js` executa `public/script.js` em um contexto
+controlado com elementos DOM simulados. Ela caracteriza o snapshot normalizado
+do formulário e o estado global de template, tema, notícia, manifest e preview,
+incluindo abertura, fechamento e troca de template. O cache de notícias tem
+cobertura parcial: reutilização para a mesma URL, substituição para URL
+diferente e o comportamento atual de uma resposta atrasada são registrados. A
+resposta atrasada ainda pode substituir o cache mais recente; o teste
+caracteriza essa limitação, mas não a corrige.
+
+A mesma suíte cobre os caminhos de validação da geração na orquestração,
+incluindo mensagens, foco e ausência de efeitos assíncronos nas falhas iniciais,
+além da restauração do loading e do botão nas falhas pós-extração cobertas. Uma
+geração válida com conflito entre valores manuais e extraídos confirma a
+precedência da categoria e da imagem manuais, a aplicação da data URL
+incorporada ao preview e o envio desse preview ao exportador simulado.
+
+A suíte de `public/js/frontend-utils.test.js` cobre as transformações puras do
+frontend, incluindo normalização, URL HTTP/HTTPS, nome do arquivo e
+`validateGenerationInput`. Para a validação da geração, confirma resultados
+estruturados com validade, código, mensagem e campo de foco para todas as
+pré-condições atuais, nas fases inicial e posterior à extração.
+
 ## Módulos e comportamentos cobertos
 
 ### Cobertura direta demonstrada
@@ -256,6 +280,8 @@ para a rota.
 | `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
+| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, precedência manual e restauração do loading e botão nos caminhos cobertos |
+| `public/js/frontend-utils.js` | `validateGenerationInput` e transformações auxiliares | validação pura estruturada, URL HTTP/HTTPS, normalização, ícones de toast e nome do PNG |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
 que todas as suas funções estejam cobertas. Não foi gerado relatório percentual
@@ -286,13 +312,14 @@ de cobertura.
 
 ### Frontend
 
-- catálogo e seleção de templates;
-- seleção e troca de tema;
-- abertura e fechamento do modal;
-- precedência entre valores manuais e extraídos;
-- associação do cache de notícia à URL;
-- respostas assíncronas atrasadas;
-- restauração de botões e loading em sucesso e erro;
+- navegador real;
+- exportação PNG real;
+- equivalência visual completa entre preview e PNG;
+- duas gerações concorrentes;
+- prevenção de respostas obsoletas;
+- mudanças nos campos durante operações assíncronas;
+- catálogo e seleção de templates por interação real;
+- seleção e troca de tema em navegador;
 - cliente das APIs;
 - construção do documento do iframe;
 - escala do preview;
@@ -301,8 +328,7 @@ de cobertura.
 - confiança em manifest e template;
 - espera de fontes e imagens;
 - bloqueio de imagens não exportáveis;
-- captura com `html-to-image`;
-- equivalência visual entre preview e PNG;
+- captura real com `html-to-image`;
 - criação e revogação da URL de download.
 
 ### Segurança e uso de recursos
@@ -353,7 +379,7 @@ Comando:
 npm.cmd test
 ```
 
-Resultado observado: todas as suítes e testes existentes passaram. Uma
+Resultado observado: 13 suítes e 295 testes passaram. Uma
 requisição controlada usa a pilha Axios/lookup/socket local; nenhuma chamada à
 internet é realizada.
 
