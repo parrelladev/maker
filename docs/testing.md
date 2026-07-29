@@ -257,6 +257,22 @@ geração válida com conflito entre valores manuais e extraídos confirma a
 precedência da categoria e da imagem manuais, a aplicação da data URL
 incorporada ao preview e o envio desse preview ao exportador simulado.
 
+Testes diretos de `buildPreviewData` caracterizam a matriz completa de
+precedência usada na arte:
+
+| Dado | Ordem caracterizada |
+| --- | --- |
+| Título e subtítulo | manual, extraído da URL correspondente, string vazia |
+| Categoria | manual, chapéu extraído da URL correspondente, string vazia |
+| Imagem no preview | manual, extraída da URL correspondente, string vazia |
+| Imagem na exportação | override incorporado, manual, extraída, string vazia |
+| Tema | tema atual e stylesheet derivado, ou valores nulos |
+| Logo | logo resolvida válida, fallback local ou remoto derivado do manifest |
+
+A mesma matriz confirma que dados associados a outra URL são ignorados, que a
+logo resolvida preserva os formatos `inline-svg` e `image`, e que a ausência de
+todos os valores conserva inclusive o fallback legado `logo-a-gazeta`.
+
 A suíte de `public/js/frontend-utils.test.js` cobre as transformações puras do
 frontend, incluindo normalização, URL HTTP/HTTPS, nome do arquivo e
 `validateGenerationInput`. Para a validação da geração, confirma resultados
@@ -293,7 +309,7 @@ botão são restaurados.
 | `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
-| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, precedência manual, data URL extraída no preview/exportação e restauração do loading e botão nos caminhos cobertos |
+| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado, transições do estado global, cache parcial, resposta atrasada caracterizada, validações da orquestração, matriz de precedência de textos, categoria, imagem, tema e logo, data URL extraída no preview/exportação e restauração do loading e botão nos caminhos cobertos |
 | `public/js/frontend-utils.js` | `validateGenerationInput` e transformações auxiliares | validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
 
 O arquivo `newsScraper.js` é carregado durante a suíte, mas isso não significa
@@ -392,7 +408,7 @@ Comando:
 npm.cmd test
 ```
 
-Resultado observado: 13 suítes e 295 testes passaram. Uma
+Resultado observado: 13 suítes e 337 testes passaram. Uma
 requisição controlada usa a pilha Axios/lookup/socket local; nenhuma chamada à
 internet é realizada.
 

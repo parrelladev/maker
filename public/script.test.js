@@ -446,6 +446,177 @@ describe('contrato de estado de public/script.js', () => {
   });
 });
 
+describe('precedência dos dados usados na arte', () => {
+  function buildData(harness, manifestData = { manifest: {}, resolvedLogo: null }, override = null) {
+    return harness.run(
+      `buildPreviewData(${JSON.stringify(manifestData)}, ${JSON.stringify(override)})`
+    );
+  }
+
+  function setMatchingExtractedData(harness) {
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.run(`
+      lastNewsUrl = 'https://example.com/noticia';
+      lastNewsData = {
+        h1: 'Título extraído',
+        h2: 'Subtítulo extraído',
+        chapeu: 'Categoria extraída',
+        bg: 'https://example.com/extraida.jpg'
+      };
+    `);
+  }
+
+  test('valores manuais vencem os valores extraídos', () => {
+    const harness = createHarness();
+    setMatchingExtractedData(harness);
+    harness.elements.customTitle.value = 'Título manual';
+    harness.elements.customSubtitle.value = 'Subtítulo manual';
+    harness.elements.customTag.value = 'Categoria manual';
+    harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
+
+    expect(buildData(harness)).toMatchObject({
+      h1: 'Título manual',
+      h2: 'Subtítulo manual',
+      tag: 'Categoria manual',
+      chapeu: 'Categoria extraída',
+      bg: 'https://example.com/manual.jpg',
+      resolvedBg: 'https://example.com/manual.jpg'
+    });
+  });
+
+  test('valores extraídos vencem os fallbacks vazios', () => {
+    const harness = createHarness();
+    setMatchingExtractedData(harness);
+
+    expect(buildData(harness)).toMatchObject({
+      h1: 'Título extraído',
+      h2: 'Subtítulo extraído',
+      tag: 'Categoria extraída',
+      chapeu: 'Categoria extraída',
+      bg: 'https://example.com/extraida.jpg',
+      resolvedBg: 'https://example.com/extraida.jpg'
+    });
+  });
+
+  test('ignora os dados da última notícia quando a URL atual não corresponde', () => {
+    const harness = createHarness();
+    harness.elements.newsUrl.value = 'https://example.com/atual';
+    harness.run(`
+      lastNewsUrl = 'https://example.com/anterior';
+      lastNewsData = {
+        h1: 'Título anterior',
+        h2: 'Subtítulo anterior',
+        chapeu: 'Categoria anterior',
+        bg: 'https://example.com/anterior.jpg'
+      };
+    `);
+
+    expect(buildData(harness)).toMatchObject({
+      h1: '',
+      h2: '',
+      tag: '',
+      chapeu: null,
+      bg: '',
+      resolvedBg: ''
+    });
+  });
+
+  test('override da exportação vence a imagem manual e a extraída', () => {
+    const harness = createHarness();
+    setMatchingExtractedData(harness);
+    harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
+
+    expect(buildData(
+      harness,
+      { manifest: {}, resolvedLogo: null },
+      'data:image/jpeg;base64,/9j/T1ZFUlJJREU='
+    )).toMatchObject({
+      bg: 'data:image/jpeg;base64,/9j/T1ZFUlJJREU=',
+      resolvedBg: 'data:image/jpeg;base64,/9j/T1ZFUlJJREU='
+    });
+  });
+
+  test.each([
+    ['rosa', 'rosa', '../css/theme-rosa.css'],
+    [null, null, null]
+  ])(
+    'incorpora o tema atual %s no payload',
+    (currentThemeValue, expectedName, expectedStylesheet) => {
+      const harness = createHarness();
+      harness.run(`currentTheme = ${JSON.stringify(currentThemeValue)}`);
+
+      expect(buildData(harness)).toMatchObject({
+        themeName: expectedName,
+        themeStylesheet: expectedStylesheet
+      });
+    }
+  );
+
+  test.each([
+    [
+      { kind: 'inline-svg', markup: '<svg><title>Logo resolvida</title></svg>' },
+      { kind: 'inline-svg', markup: '<svg><title>Logo resolvida</title></svg>' }
+    ],
+    [
+      { kind: 'image', src: '/input/logo-resolvida.png' },
+      { kind: 'image', src: '/input/logo-resolvida.png' }
+    ]
+  ])('logo resolvida %j vence o fallback do manifest', (resolvedLogo, expected) => {
+    const harness = createHarness();
+
+    const result = buildData(harness, {
+      manifest: {
+        logoField: 'brand',
+        defaultLogo: 'logo-fallback.svg'
+      },
+      resolvedLogo
+    });
+
+    expect(result).toMatchObject({
+      brand: 'logo-fallback.svg',
+      resolvedLogo: expected
+    });
+  });
+
+  test.each([
+    ['logo-local.svg', '/input/logo-local.svg'],
+    ['https://cdn.example/logo.png', 'https://cdn.example/logo.png']
+  ])(
+    'usa o fallback atual para a logo não resolvida %s',
+    (defaultLogo, expectedSrc) => {
+      const harness = createHarness();
+
+      expect(buildData(harness, {
+        manifest: { defaultLogo },
+        resolvedLogo: null
+      })).toMatchObject({
+        logo: defaultLogo,
+        resolvedLogo: { kind: 'image', src: expectedSrc }
+      });
+    }
+  );
+
+  test('ausência de valores preserva todos os fallbacks atuais', () => {
+    const harness = createHarness();
+
+    expect(buildData(harness)).toEqual({
+      h1: '',
+      h2: '',
+      tag: '',
+      chapeu: null,
+      bg: '',
+      resolvedBg: '',
+      themeName: null,
+      themeStylesheet: null,
+      logo: 'logo-a-gazeta',
+      resolvedLogo: {
+        kind: 'image',
+        src: '/input/logo-a-gazeta'
+      }
+    });
+  });
+});
+
 describe('validacoes atuais da geracao', () => {
   test.each([
     {
