@@ -126,6 +126,18 @@ const fetchDataBtn = document.getElementById('fetchDataBtn');
 const previewFrame = document.getElementById('previewFrame');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
 
+function readGenerationFormData() {
+  return {
+    newsUrl: normalizeOptionalValue(newsUrl.value),
+    manualTitle: normalizeOptionalValue(customTitle.value),
+    manualSubtitle: normalizeOptionalValue(customSubtitle.value),
+    manualCategory: normalizeOptionalValue(customTag.value),
+    manualImage: normalizeOptionalValue(customImageUrl.value),
+    theme: currentTheme,
+    template: currentTemplate
+  };
+}
+
 function resizePreviewFrame() {
   const wrapper = document.querySelector('.preview-frame-wrapper');
   if (!wrapper || !previewFrame) return;
@@ -424,9 +436,10 @@ async function loadManifest(template, page = 'index') {
 
 // Etapa 1: busca dados da matéria e monta o preview HTML
 async function handleFetchNewsAndPreview() {
-  const url = normalizeOptionalValue(newsUrl.value);
+  const formData = readGenerationFormData();
+  const url = formData.newsUrl;
 
-  if (!currentTemplate) {
+  if (!formData.template) {
     showToast('Escolha um template antes de buscar os dados', 'error');
     return;
   }
@@ -455,16 +468,18 @@ async function handleFetchNewsAndPreview() {
       return;
     }
 
-    if (!normalizeOptionalValue(customTitle.value) && extractedData.h1) {
+    const currentFormData = readGenerationFormData();
+
+    if (!currentFormData.manualTitle && extractedData.h1) {
       customTitle.value = extractedData.h1;
     }
-    if (!normalizeOptionalValue(customSubtitle.value) && extractedData.h2) {
+    if (!currentFormData.manualSubtitle && extractedData.h2) {
       customSubtitle.value = extractedData.h2;
     }
-    if (!normalizeOptionalValue(customTag.value) && extractedData.chapeu) {
+    if (!currentFormData.manualCategory && extractedData.chapeu) {
       customTag.value = extractedData.chapeu;
     }
-    if (!normalizeOptionalValue(customImageUrl.value) && extractedData.bg) {
+    if (!currentFormData.manualImage && extractedData.bg) {
       customImageUrl.value = extractedData.bg;
     }
 
@@ -699,14 +714,15 @@ async function ensurePreviewInitialized() {
 }
 
 function buildPreviewData(manifestData, backgroundOverride = null) {
-  const url = normalizeOptionalValue(newsUrl.value);
+  const formData = readGenerationFormData();
+  const url = formData.newsUrl;
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
   const extractedData = hasMatchingNews ? lastNewsData : {};
 
-  const manualTitle = normalizeOptionalValue(customTitle.value);
-  const manualSubtitle = normalizeOptionalValue(customSubtitle.value);
-  const manualTag = normalizeOptionalValue(customTag.value);
-  const manualBg = normalizeOptionalValue(customImageUrl.value);
+  const manualTitle = formData.manualTitle;
+  const manualSubtitle = formData.manualSubtitle;
+  const manualTag = formData.manualCategory;
+  const manualBg = formData.manualImage;
 
   const effectiveTitle = manualTitle || extractedData.h1 || '';
   const effectiveSubtitle = manualSubtitle || extractedData.h2 || '';
@@ -717,7 +733,7 @@ function buildPreviewData(manifestData, backgroundOverride = null) {
   const logoField = manifestData.manifest?.logoField || 'logo';
   const defaultLogo = manifestData.manifest?.defaultLogo || 'logo-a-gazeta';
 
-  const themeName = currentTheme || null;
+  const themeName = formData.theme || null;
   const themeStylesheet = themeName ? `../css/theme-${themeName}.css` : null;
 
   const data = {
@@ -789,10 +805,11 @@ async function updatePreview(backgroundOverride = null) {
 
 // Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
 async function generateArtWithPreviewFlow() {
-  const url = normalizeOptionalValue(newsUrl.value);
-  const imageOverride = normalizeOptionalValue(customImageUrl.value);
+  const formData = readGenerationFormData();
+  const url = formData.newsUrl;
+  const imageOverride = formData.manualImage;
 
-  if (!currentTemplate) {
+  if (!formData.template) {
     showToast('Escolha um template antes de gerar a arte', 'error');
     return;
   }
@@ -824,11 +841,13 @@ async function generateArtWithPreviewFlow() {
     const extractedData = await getOrExtractNewsData(url);
     const extractedChapeu = extractedData.chapeu || null;
 
-    if (!normalizeOptionalValue(customTag.value) && extractedChapeu) {
+    let currentFormData = readGenerationFormData();
+    if (!currentFormData.manualCategory && extractedChapeu) {
       customTag.value = extractedChapeu;
+      currentFormData = readGenerationFormData();
     }
 
-    const manualTag = normalizeOptionalValue(customTag.value);
+    const manualTag = currentFormData.manualCategory;
     const resolvedChapeu = manualTag || extractedChapeu || '';
     const effectiveBg = imageOverride || extractedData.bg || null;
 

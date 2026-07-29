@@ -201,6 +201,10 @@ também são exportadas para testes unitários.
 orquestração dos fluxos. Ele também gera como string o runtime de bindings
 executado no `iframe`.
 
+`readGenerationFormData` concentra a leitura dos cinco campos do formulário e
+dos estados atuais de tema e template em um snapshot normalizado, sem alterar
+esses estados.
+
 `public/js/preview-export.js` expõe `window.PreviewExport`. O módulo espera
 fontes e imagens, verifica imagens HTTP(S), chama `html-to-image` dentro do
 `iframe` e inicia o download por meio de um link temporário.

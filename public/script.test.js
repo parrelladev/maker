@@ -184,6 +184,28 @@ function createHarness() {
 }
 
 describe('contrato de estado de public/script.js', () => {
+  test('lê um snapshot normalizado dos dados atuais do formulário de geração', () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = '  https://example.com/noticia  ';
+    harness.elements.customTitle.value = '  Título manual  ';
+    harness.elements.customSubtitle.value = '  Subtítulo manual  ';
+    harness.elements.customTag.value = '  Categoria manual  ';
+    harness.elements.customImageUrl.value = '  imagem-manual  ';
+
+    const result = harness.run('readGenerationFormData()');
+
+    expect(result).toEqual({
+      newsUrl: 'https://example.com/noticia',
+      manualTitle: 'Título manual',
+      manualSubtitle: 'Subtítulo manual',
+      manualCategory: 'Categoria manual',
+      manualImage: 'imagem-manual',
+      theme: 'rosa',
+      template: 'layout-hz'
+    });
+  });
+
   test('abre o modal com template, metadados, tema padrão e preview reiniciado', () => {
     const harness = createHarness();
 
