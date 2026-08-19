@@ -1278,6 +1278,215 @@ describe('descarte de buscas de notícia obsoletas', () => {
     expect(updatePreview).toHaveBeenCalledTimes(1);
   });
 
+  test('não anuncia sucesso quando a aplicação ao preview da busca atual falha', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
+      throw new Error('binding inválido');
+    });
+    harness.extractNewsData.mockResolvedValue(newsData('A'));
+
+    await startFetch(harness, 'https://example.com/a');
+
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.elements.toastContainer.children[0].innerHTML)
+      .toContain('Erro ao buscar dados da notícia: binding inválido');
+    expect(harness.elements.toastContainer.children[0].innerHTML)
+      .not.toContain('Dados da notícia carregados');
+    expect(harness.elements.fetchDataBtn.disabled).toBe(false);
+  });
+
+  test('ignora falha de preview quando a busca se torna obsoleta durante a aplicação', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.extractNewsData.mockResolvedValue(newsData('A'));
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
+      harness.elements.newsUrl.value = 'https://example.com/b';
+      throw new Error('binding da busca antiga');
+    });
+
+    await startFetch(harness, 'https://example.com/a');
+
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.context.console.error).not.toHaveBeenCalled();
+  });
+
+  test('trata explicitamente falha de atualização auxiliar do preview', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    await harness.run('updatePreview()');
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
+      throw new Error('falha auxiliar');
+    });
+
+    harness.elements.customTitle.dispatch('input');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.context.console.error).toHaveBeenCalledTimes(1);
+    expect(harness.context.console.error).toHaveBeenCalledWith(
+      'Erro ao atualizar preview:',
+      expect.objectContaining({ message: 'falha auxiliar' })
+    );
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
+  test('preserva atualização auxiliar válida da sessão atual', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    await harness.run('updatePreview()');
+    const updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+
+    harness.elements.customTitle.value = 'Título atual';
+    harness.elements.customTitle.dispatch('input');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({
+      h1: 'Título atual'
+    }));
+    expect(harness.context.console.error).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
+  test('ignora falha auxiliar de preview pertencente a uma sessão antiga', async () => {
+    const harness = createHarness({ autoResolveRuntime: false });
+    const documentWritten = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.frameDocument.write.mockImplementation(html => {
+      if (html.includes('preview-runtime.js')) documentWritten.resolve();
+    });
+
+    harness.elements.customTitle.dispatch('input');
+    await documentWritten.promise;
+    const rejectOldRuntime = harness.elements.previewFrame.contentWindow
+      .__rejectPreviewRuntimeReady;
+
+    harness.run(`closeModalHandler(); openModal('rede-gazeta')`);
+    rejectOldRuntime(new Error('runtime da sessão antiga'));
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+
+    expect(harness.context.console.error).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
+  test('ignora falha auxiliar de uma inicialização substituída na mesma sessão', async () => {
+    const harness = createHarness({ autoResolveRuntime: false });
+    const firstDocumentWritten = createDeferred();
+    const secondDocumentWritten = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.frameDocument.write
+      .mockImplementationOnce(() => firstDocumentWritten.resolve())
+      .mockImplementationOnce(() => secondDocumentWritten.resolve());
+
+    harness.elements.customTitle.dispatch('input');
+    await firstDocumentWritten.promise;
+    const rejectFirstRuntime = harness.elements.previewFrame.contentWindow
+      .__rejectPreviewRuntimeReady;
+
+    harness.elements.customSubtitle.dispatch('input');
+    await secondDocumentWritten.promise;
+    const rejectSecondRuntime = harness.elements.previewFrame.contentWindow
+      .__rejectPreviewRuntimeReady;
+    rejectFirstRuntime(new Error('runtime da inicialização substituída'));
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+
+    expect(harness.context.console.error).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'layout-hz',
+      currentManifestData: null,
+      previewInitializedTemplate: null
+    });
+
+    rejectSecondRuntime(new Error('runtime da inicialização atual'));
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+
+    expect(harness.context.console.error).toHaveBeenCalledTimes(1);
+    expect(harness.context.console.error).toHaveBeenCalledWith(
+      'Erro ao atualizar preview:',
+      expect.objectContaining({ message: 'Falha ao inicializar o runtime do preview' })
+    );
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
+  test('não aplica atualização auxiliar antiga que resolve depois da mais nova existir', async () => {
+    const harness = createHarness({ autoResolveRuntime: false });
+    const firstDocumentWritten = createDeferred();
+    const secondDocumentWritten = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.frameDocument.write
+      .mockImplementationOnce(() => firstDocumentWritten.resolve())
+      .mockImplementationOnce(() => secondDocumentWritten.resolve());
+
+    harness.elements.customTitle.value = 'Título A';
+    harness.elements.customTitle.dispatch('input');
+    await firstDocumentWritten.promise;
+    const resolveFirstRuntime = harness.elements.previewFrame.contentWindow
+      .__resolvePreviewRuntimeReady;
+
+    harness.elements.customTitle.value = 'Título B';
+    harness.elements.customTitle.dispatch('input');
+    await secondDocumentWritten.promise;
+    const resolveSecondRuntime = harness.elements.previewFrame.contentWindow
+      .__resolvePreviewRuntimeReady;
+    const updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+
+    resolveFirstRuntime();
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+    expect(updatePreview).not.toHaveBeenCalled();
+
+    resolveSecondRuntime();
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+    expect(updatePreview).toHaveBeenCalledTimes(1);
+    expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({ h1: 'Título B' }));
+    expect(harness.context.console.error).not.toHaveBeenCalled();
+  });
+
+  test('somente a terceira de três falhas auxiliares é considerada atual', async () => {
+    const harness = createHarness();
+    const updateA = createDeferred();
+    const updateB = createDeferred();
+    const updateC = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.context.controlledUpdatePreview = jest.fn()
+      .mockReturnValueOnce(updateA.promise)
+      .mockReturnValueOnce(updateB.promise)
+      .mockReturnValueOnce(updateC.promise);
+    harness.run('updatePreview = controlledUpdatePreview');
+
+    harness.elements.customTitle.dispatch('input');
+    harness.elements.customSubtitle.dispatch('input');
+    harness.elements.customTag.dispatch('input');
+    updateA.reject(new Error('falha A'));
+    updateB.reject(new Error('falha B'));
+    updateC.reject(new Error('falha C'));
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+
+    expect(harness.context.console.error).toHaveBeenCalledTimes(1);
+    expect(harness.context.console.error).toHaveBeenCalledWith(
+      'Erro ao atualizar preview:',
+      expect.objectContaining({ message: 'falha C' })
+    );
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
   test('permite retry depois que a busca atual falha', async () => {
     const harness = createHarness();
     harness.run(`openModal('layout-hz')`);
@@ -2252,6 +2461,48 @@ describe('validacoes atuais da geracao', () => {
     expectNoSuccessToast(harness);
     expect(harness.elements.toastContainer.children.at(-1).innerHTML)
       .toContain('Erro ao gerar arte: binding final inválido');
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('bloqueia exportação quando o runtime não expõe a atualização final', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria',
+      bg: 'data:image/png;base64,QQ=='
+    });
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('O runtime do preview não está disponível');
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('restaura a interface quando uma imagem do preview falha ao carregar', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    harness.context.PreviewExport.downloadPreview.mockRejectedValue(
+      new Error('Não foi possível carregar uma imagem do preview')
+    );
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('Não foi possível carregar uma imagem do preview');
     expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });

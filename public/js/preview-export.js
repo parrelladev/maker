@@ -1,12 +1,23 @@
 (function (global) {
   function waitForImages(doc) {
     return Promise.all(Array.from(doc.images || []).map((image) => {
-      if (image.complete && image.naturalWidth > 0) {
+      if (image.complete) {
+        if (image.naturalWidth <= 0) {
+          return Promise.reject(new Error('Não foi possível carregar uma imagem do preview'));
+        }
         return image.decode ? image.decode().catch(() => {}) : Promise.resolve();
       }
-      return new Promise((resolve) => {
-        image.addEventListener('load', resolve, { once: true });
-        image.addEventListener('error', resolve, { once: true });
+      return new Promise((resolve, reject) => {
+        image.addEventListener('load', () => {
+          if (image.naturalWidth > 0) {
+            resolve();
+          } else {
+            reject(new Error('Não foi possível carregar uma imagem do preview'));
+          }
+        }, { once: true });
+        image.addEventListener('error', () => {
+          reject(new Error('Não foi possível carregar uma imagem do preview'));
+        }, { once: true });
       });
     }));
   }

@@ -273,7 +273,15 @@ loading do botão, fechamento e reabertura do modal, edição da URL durante a
 requisição, preservação da proveniência da imagem de B, ausência de uma segunda
 atualização do preview por A e retry após falha atual. Os casos confirmam que
 respostas obsoletas não alteram campos, cache, proveniência, iframe, toasts ou o
-botão pertencente à busca mais nova, sem usar temporizadores.
+botão pertencente à busca mais nova, sem usar temporizadores. Falhas atuais ao
+aplicar o preview impedem o toast de sucesso e restauram o botão; falhas que se
+tornam obsoletas durante a aplicação continuam silenciosas. Atualizações
+best-effort disparadas pelos campos encerram rejeições explicitamente sem criar
+toast. O teste de troca de sessão mantém silenciosa uma rejeição auxiliar antiga,
+enquanto falha auxiliar atual ainda produz um único log. Inicializações
+concorrentes na mesma sessão cobrem rejeição e resolução fora de ordem, e um
+caso com três solicitações confirma que somente a versão mais recente pode ser
+considerada atual.
 
 O cache também é exercitado com `null`, `undefined`, objeto vazio e resultados
 parciais contendo isoladamente título, subtítulo, chapéu ou imagem. Os testes
@@ -324,6 +332,11 @@ após um evento `input`, a limpeza dessa origem entre modal e template e a
 incorporação de uma imagem manual HTTP cujo backend retorna uma data URL JPEG
 validada. Nesses fluxos, preview e exportação recebem a mesma imagem e loading e
 botão são restaurados.
+
+`public/js/preview-export.test.js` cobre imagem já carregada, URL HTTP(S), espera
+por `load`, rejeição por `error`, imagem completa sem dimensões e rejeição
+best-effort de `decode()` para uma imagem já válida. Os casos de falha confirmam
+que a captura por `html-to-image` não começa.
 
 A suíte também executa o módulo estático `public/js/preview-runtime.js` pelo
 mesmo bootstrap escrito no iframe. Os testes caracterizam sua API explícita,

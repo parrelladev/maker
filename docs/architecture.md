@@ -260,8 +260,11 @@ modal também limpam esse estado, impedindo que uma associação antiga seja
 reutilizada.
 
 `public/js/preview-export.js` expõe `window.PreviewExport`. O módulo espera
-fontes e imagens, verifica imagens HTTP(S), chama `html-to-image` dentro do
-`iframe` e inicia o download por meio de um link temporário.
+fontes e imagens, rejeita imagens que terminam o carregamento sem dimensões,
+verifica imagens HTTP(S), chama `html-to-image` dentro do `iframe` e inicia o
+download por meio de um link temporário. A rejeição de `decode()` permanece
+best-effort somente quando a imagem já está completa e possui largura válida;
+ela não equivale ao evento real de erro de carregamento.
 
 ## Listagem e carregamento de templates
 
@@ -451,7 +454,13 @@ processo. Tanto `updatePreview` quanto a geração montam o payload por
 runtime pronto precede a aplicação síncrona do payload final, que precede
 `downloadPreview`; preview e PNG observam o mesmo DOM. Se a aplicação final
 falhar, o erro chega ao tratamento da geração e a exportação não é iniciada. O
-placeholder é ocultado somente depois da readiness.
+placeholder é ocultado somente depois da readiness. `updatePreview` também
+propaga falhas atuais ao fluxo de busca, impedindo o toast de sucesso; listeners
+de edição tratam essa atualização como best-effort, encerram a rejeição com log
+e não exibem toast. Cada atualização auxiliar recebe um identificador monotônico
+e captura sessão, template e página ao iniciar. Somente a solicitação mais
+recente desse contexto pode aplicar o payload ou registrar uma falha; conclusões
+substituídas e falhas cujo contexto não é mais atual permanecem silenciosas.
 
 ## Bindings do manifest
 
@@ -690,8 +699,6 @@ No frontend:
   depois de `document.write` no iframe.
 - Preview e exportação dependem de APIs de navegador, fontes, carregamento de
   imagens, CORS, timing e `html-to-image`.
-- Listeners de inputs descartam rejeições de `updatePreview` com
-  `catch(() => {})`, embora a função também trate erros internamente.
 - Operações assíncronas de extração e inicialização não carregam um identificador
   de requisição; respostas atrasadas podem atualizar o estado depois de uma
   mudança de URL ou template.

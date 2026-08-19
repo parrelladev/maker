@@ -115,6 +115,7 @@ let previewInitializationVersion = 0;
 let modalSessionVersion = 0;
 let latestGenerationId = 0;
 let latestNewsFetchId = 0;
+let latestBestEffortPreviewUpdateId = 0;
 let resolvedImageFieldState = {
   source: null,
   value: null,
@@ -340,26 +341,26 @@ function setupEventListeners() {
 
   if (customTitle) {
     customTitle.addEventListener('input', () => {
-      updatePreview().catch(() => {});
+      requestBestEffortPreviewUpdate();
     });
   }
 
   if (customSubtitle) {
     customSubtitle.addEventListener('input', () => {
-      updatePreview().catch(() => {});
+      requestBestEffortPreviewUpdate();
     });
   }
 
   if (customTag) {
     customTag.addEventListener('input', () => {
-      updatePreview().catch(() => {});
+      requestBestEffortPreviewUpdate();
     });
   }
 
   if (customImageUrl) {
     customImageUrl.addEventListener('input', () => {
       clearResolvedImageFieldState();
-      updatePreview().catch(() => {});
+      requestBestEffortPreviewUpdate();
     });
   }
 
@@ -367,7 +368,7 @@ function setupEventListeners() {
     customTheme.addEventListener('change', (event) => {
       currentTheme = event.target.value || null;
       updateModalTitle();
-      updatePreview().catch(() => {});
+      requestBestEffortPreviewUpdate();
     });
   }
 
@@ -824,10 +825,45 @@ function buildPreviewData(
 function applyArtworkDataToPreview(artworkData) {
   const frameWindow = previewFrame && previewFrame.contentWindow;
   if (!frameWindow || typeof frameWindow.__updatePreview !== 'function') {
-    return;
+    throw new Error('O runtime do preview não está disponível');
   }
 
   frameWindow.__updatePreview(artworkData);
+}
+
+function isBestEffortPreviewContextCurrent(context) {
+  return (
+    context.updateId === latestBestEffortPreviewUpdateId
+    && context.modalSessionVersion === modalSessionVersion
+    && context.template === currentTemplate
+    && context.page === DEFAULT_PAGE
+  );
+}
+
+function assertBestEffortPreviewContextCurrent(context) {
+  if (isBestEffortPreviewContextCurrent(context)) return;
+
+  const error = new Error('Atualização auxiliar do preview obsoleta');
+  error.code = STALE_OPERATION_CODE;
+  throw error;
+}
+
+function handleBestEffortPreviewUpdateError(error, context) {
+  if (!isBestEffortPreviewContextCurrent(context)) return;
+  if (isStaleOperationError(error)) return;
+  console.error('Erro ao atualizar preview:', error);
+}
+
+function requestBestEffortPreviewUpdate() {
+  const context = {
+    updateId: ++latestBestEffortPreviewUpdateId,
+    modalSessionVersion,
+    template: currentTemplate,
+    page: DEFAULT_PAGE
+  };
+  const assertCurrent = () => assertBestEffortPreviewContextCurrent(context);
+  updatePreview(null, assertCurrent)
+    .catch(error => handleBestEffortPreviewUpdateError(error, context));
 }
 
 async function updatePreview(backgroundOverride = null, assertCurrent = null) {
@@ -845,7 +881,8 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null) {
     applyArtworkDataToPreview(artworkData);
   } catch (error) {
     if (isStaleOperationError(error)) return;
-    console.error('Erro ao atualizar preview:', error);
+    if (assertCurrent) assertCurrent();
+    throw error;
   }
 }
 
