@@ -98,7 +98,7 @@ const {
 const templateLookup = Object.fromEntries(storyTemplates.map(template => [template.id, template]));
 const storyGroups = Array.from(new Set(storyTemplates.map(template => template.group)));
 const DEFAULT_PAGE = 'index';
-const STALE_GENERATION_CODE = 'GENERATION_STALE';
+const STALE_OPERATION_CODE = 'OPERATION_STALE';
 
 let currentTemplate = null;
 let currentTemplateMeta = null;
@@ -114,6 +114,7 @@ let previewInitializedPage = null;
 let previewInitializationVersion = 0;
 let modalSessionVersion = 0;
 let latestGenerationId = 0;
+let latestNewsFetchId = 0;
 let resolvedImageFieldState = {
   source: null,
   value: null,
@@ -196,6 +197,34 @@ function createGenerationContext(formData) {
   };
 }
 
+function createNewsFetchContext(formData) {
+  return {
+    fetchId: ++latestNewsFetchId,
+    modalSessionVersion,
+    page: DEFAULT_PAGE,
+    template: formData.template,
+    url: formData.newsUrl
+  };
+}
+
+function isNewsFetchContextCurrent(context) {
+  return (
+    context.fetchId === latestNewsFetchId
+    && context.modalSessionVersion === modalSessionVersion
+    && context.template === currentTemplate
+    && context.page === DEFAULT_PAGE
+    && context.url === normalizeOptionalValue(newsUrl.value)
+  );
+}
+
+function assertNewsFetchContextCurrent(context) {
+  if (isNewsFetchContextCurrent(context)) return;
+
+  const error = new Error('Busca de dados obsoleta');
+  error.code = STALE_OPERATION_CODE;
+  throw error;
+}
+
 function isGenerationContextCurrent(context) {
   return (
     context.generationId === latestGenerationId
@@ -210,12 +239,12 @@ function assertGenerationContextCurrent(context) {
   if (isGenerationContextCurrent(context)) return;
 
   const error = new Error('Geração obsoleta');
-  error.code = STALE_GENERATION_CODE;
+  error.code = STALE_OPERATION_CODE;
   throw error;
 }
 
-function isStaleGenerationError(error) {
-  return error && error.code === STALE_GENERATION_CODE;
+function isStaleOperationError(error) {
+  return error && error.code === STALE_OPERATION_CODE;
 }
 
 function resizePreviewFrame() {
@@ -300,6 +329,9 @@ function setupEventListeners() {
 
   newsUrl.addEventListener('input', () => {
     clearResolvedImageFieldState({ clearMatchingField: true });
+    if (fetchDataBtn) {
+      fetchDataBtn.disabled = false;
+    }
   });
 
   if (fetchDataBtn) {
@@ -486,6 +518,9 @@ function openModal(templateKey) {
   }
 
   modal.classList.add('show');
+  if (fetchDataBtn) {
+    fetchDataBtn.disabled = false;
+  }
   newsUrl.focus();
   resizePreviewFrame();
 }
@@ -515,7 +550,14 @@ function closeModalHandler() {
 async function loadManifest(template, page = 'index') {
     return window.Api.loadManifest(template, page);
   }
-  
+
+function hasUsefulNewsData(data) {
+  if (!data || typeof data !== 'object') return false;
+
+  return ['h1', 'h2', 'chapeu', 'bg']
+    .some(field => normalizeOptionalValue(data[field]));
+}
+
   async function getOrExtractNewsData(url, assertCurrent = null) {
   if (assertCurrent) assertCurrent();
 
@@ -526,8 +568,10 @@ async function loadManifest(template, page = 'index') {
   clearResolvedImageFieldState({ clearMatchingField: true });
   const data = (await window.Api.extractNewsData(url)) || {};
   if (assertCurrent) assertCurrent();
-  lastNewsUrl = url;
-  lastNewsData = data;
+  if (hasUsefulNewsData(data)) {
+    lastNewsUrl = url;
+    lastNewsData = data;
+  }
   return data;
 }
 
@@ -553,12 +597,16 @@ async function handleFetchNewsAndPreview() {
     return;
   }
 
+  const fetchContext = createNewsFetchContext(formData);
+  const assertCurrent = () => assertNewsFetchContextCurrent(fetchContext);
+
   try {
     if (fetchDataBtn) {
       fetchDataBtn.disabled = true;
     }
 
-    const extractedData = await getOrExtractNewsData(url);
+    const extractedData = await getOrExtractNewsData(url, assertCurrent);
+    assertCurrent();
 
     if (!extractedData || (!extractedData.h1 && !extractedData.h2 && !extractedData.bg)) {
       showToast('Não foi possível extrair dados desta notícia.', 'error');
@@ -580,14 +628,21 @@ async function handleFetchNewsAndPreview() {
       setExtractedImageFieldValue(extractedData.bg, url);
     }
 
-    await updatePreview();
+    await updatePreview(null, assertCurrent);
+    assertCurrent();
 
     showToast('Dados da notícia carregados. Ajuste o texto se quiser.', 'success');
   } catch (error) {
+    if (
+      isStaleOperationError(error)
+      || !isNewsFetchContextCurrent(fetchContext)
+    ) {
+      return;
+    }
     console.error('Erro ao buscar dados da notícia:', error);
     showToast('Erro ao buscar dados da notícia: ' + error.message, 'error');
   } finally {
-    if (fetchDataBtn) {
+    if (fetchDataBtn && isNewsFetchContextCurrent(fetchContext)) {
       fetchDataBtn.disabled = false;
     }
   }
@@ -775,18 +830,21 @@ function applyArtworkDataToPreview(artworkData) {
   frameWindow.__updatePreview(artworkData);
 }
 
-async function updatePreview(backgroundOverride = null) {
+async function updatePreview(backgroundOverride = null, assertCurrent = null) {
   if (!previewFrame || !currentTemplate) {
     return;
   }
 
   try {
-    const manifestData = await ensurePreviewInitialized();
+    const manifestData = await ensurePreviewInitialized({ assertCurrent });
     if (!manifestData) return;
+    if (assertCurrent) assertCurrent();
 
     const artworkData = buildPreviewData(manifestData, backgroundOverride);
+    if (assertCurrent) assertCurrent();
     applyArtworkDataToPreview(artworkData);
   } catch (error) {
+    if (isStaleOperationError(error)) return;
     console.error('Erro ao atualizar preview:', error);
   }
 }
@@ -884,7 +942,7 @@ async function generateArtWithPreviewFlow() {
     showToast('Arte gerada e download iniciado!', 'success');
   } catch (error) {
     if (
-      isStaleGenerationError(error)
+      isStaleOperationError(error)
       || !isGenerationContextCurrent(generationContext)
     ) {
       return;

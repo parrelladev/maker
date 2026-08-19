@@ -1007,6 +1007,60 @@ describe('contrato de estado de public/script.js', () => {
     });
   });
 
+  test.each([
+    { h1: 'Título parcial' },
+    { h2: 'Subtítulo parcial' },
+    { chapeu: 'Categoria parcial' },
+    { bg: 'data:image/png;base64,QQ==' }
+  ])('cacheia resultado parcial legítimo: %o', async partialData => {
+    const harness = createHarness();
+    harness.extractNewsData.mockResolvedValue(partialData);
+
+    const first = await harness.run(`getOrExtractNewsData('https://example.com/a')`);
+    const reused = await harness.run(`getOrExtractNewsData('https://example.com/a')`);
+
+    expect(first).toEqual(partialData);
+    expect(reused).toEqual(partialData);
+    expect(harness.extractNewsData).toHaveBeenCalledTimes(1);
+  });
+
+  test('resultado vazio não substitui cache válido anterior', async () => {
+    const harness = createHarness();
+    harness.run(`
+      lastNewsUrl = 'https://example.com/a';
+      lastNewsData = { h1: 'Cache válido' };
+    `);
+    harness.extractNewsData.mockResolvedValue({});
+
+    const result = await harness.run(
+      `getOrExtractNewsData('https://example.com/b')`
+    );
+
+    expect(result).toEqual({});
+    expect(harness.state()).toMatchObject({
+      lastNewsUrl: 'https://example.com/a',
+      lastNewsData: { h1: 'Cache válido' }
+    });
+  });
+
+  test.each([null, undefined, {}])(
+    'não reutiliza resultado sem conteúdo útil: %p',
+    async emptyData => {
+      const harness = createHarness();
+      harness.extractNewsData
+        .mockResolvedValueOnce(emptyData)
+        .mockResolvedValueOnce({ h1: 'Retry válido' });
+
+      await harness.run(`getOrExtractNewsData('https://example.com/a')`);
+      const retry = await harness.run(
+        `getOrExtractNewsData('https://example.com/a')`
+      );
+
+      expect(retry).toEqual({ h1: 'Retry válido' });
+      expect(harness.extractNewsData).toHaveBeenCalledTimes(2);
+    }
+  );
+
   test('reabrir após fechar começa uma sessão limpa com o novo template', () => {
     const harness = createHarness();
     harness.run(`openModal('layout-hz');
@@ -1031,6 +1085,270 @@ describe('contrato de estado de public/script.js', () => {
     });
     expect(harness.elements.customTitle.value).toBe('');
     expect(harness.elements.templateModal.classList.contains('show')).toBe(true);
+  });
+});
+
+describe('descarte de buscas de notícia obsoletas', () => {
+  function startFetch(harness, url) {
+    harness.elements.newsUrl.value = url;
+    return harness.run('handleFetchNewsAndPreview()');
+  }
+
+  function newsData(label) {
+    return {
+      h1: `Título ${label}`,
+      h2: `Subtítulo ${label}`,
+      chapeu: `Categoria ${label}`,
+      bg: `data:image/png;base64,${label === 'A' ? 'QQ==' : 'Qg=='}`
+    };
+  }
+
+  test('mantém B quando A lenta resolve depois de B rápida', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockReturnValueOnce(extractionA.promise)
+      .mockReturnValueOnce(extractionB.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    const fetchB = startFetch(harness, 'https://example.com/b');
+    extractionB.resolve(newsData('B'));
+    await fetchB;
+    extractionA.resolve(newsData('A'));
+    await fetchA;
+
+    expect(harness.elements.customTitle.value).toBe('Título B');
+    expect(harness.elements.customSubtitle.value).toBe('Subtítulo B');
+    expect(harness.elements.customTag.value).toBe('Categoria B');
+    expect(harness.state()).toMatchObject({
+      lastNewsUrl: 'https://example.com/b',
+      lastNewsData: newsData('B')
+    });
+  });
+
+  test('preserva o comportamento nominal quando A resolve antes de iniciar B', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockResolvedValueOnce(newsData('A'))
+      .mockResolvedValueOnce(newsData('B'));
+
+    await startFetch(harness, 'https://example.com/a');
+    harness.elements.customTitle.value = '';
+    harness.elements.customSubtitle.value = '';
+    harness.elements.customTag.value = '';
+    harness.elements.customImageUrl.value = '';
+    await startFetch(harness, 'https://example.com/b');
+
+    expect(harness.elements.customTitle.value).toBe('Título B');
+    expect(harness.state()).toMatchObject({ lastNewsUrl: 'https://example.com/b' });
+    expect(harness.elements.toastContainer.children).toHaveLength(2);
+  });
+
+  test('ignora rejeição de A depois de B concluir', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockReturnValueOnce(extractionA.promise)
+      .mockReturnValueOnce(extractionB.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    const fetchB = startFetch(harness, 'https://example.com/b');
+    extractionB.resolve(newsData('B'));
+    await fetchB;
+    extractionA.reject(new Error('falha antiga'));
+    await fetchA;
+
+    expect(harness.elements.customTitle.value).toBe('Título B');
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
+    expect(harness.context.console.error).not.toHaveBeenCalledWith(
+      'Erro ao buscar dados da notícia:', expect.anything()
+    );
+  });
+
+  test('A não restaura o botão enquanto B ainda está pendente', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.extractNewsData
+      .mockReturnValueOnce(extractionA.promise)
+      .mockReturnValueOnce(extractionB.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    const fetchB = startFetch(harness, 'https://example.com/b');
+    extractionA.resolve(newsData('A'));
+    await fetchA;
+    expect(harness.elements.fetchDataBtn.disabled).toBe(true);
+
+    extractionB.resolve(newsData('B'));
+    await fetchB;
+    expect(harness.elements.fetchDataBtn.disabled).toBe(false);
+  });
+
+  test('ignora A depois que o modal é fechado e reaberto', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    const updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.extractNewsData.mockReturnValue(extractionA.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    harness.run(`closeModalHandler(); openModal('rede-gazeta')`);
+    harness.elements.customTitle.value = 'Nova sessão';
+    extractionA.resolve(newsData('A'));
+    await fetchA;
+
+    expect(harness.elements.customTitle.value).toBe('Nova sessão');
+    expect(harness.state()).toMatchObject({ lastNewsUrl: null, lastNewsData: null });
+    expect(updatePreview).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
+  test('ignora A quando a URL é editada durante a requisição', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.extractNewsData.mockReturnValue(extractionA.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    harness.elements.newsUrl.value = 'https://example.com/b';
+    extractionA.resolve(newsData('A'));
+    await fetchA;
+
+    expect(harness.elements.customTitle.value).toBe('');
+    expect(harness.state()).toMatchObject({ lastNewsUrl: null, lastNewsData: null });
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+  });
+
+  test('preserva a proveniência da imagem de B quando A resolve depois', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockReturnValueOnce(extractionA.promise)
+      .mockReturnValueOnce(extractionB.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    const fetchB = startFetch(harness, 'https://example.com/b');
+    extractionB.resolve(newsData('B'));
+    await fetchB;
+    extractionA.resolve(newsData('A'));
+    await fetchA;
+
+    const provenance = JSON.parse(harness.run(
+      'JSON.stringify(resolvedImageFieldState)'
+    ));
+    expect(provenance).toEqual({
+      source: 'extracted',
+      value: newsData('B').bg,
+      newsUrl: 'https://example.com/b'
+    });
+  });
+
+  test('A antiga não atualiza o preview novamente depois de B', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    const updatePreview = jest.fn();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.extractNewsData
+      .mockReturnValueOnce(extractionA.promise)
+      .mockReturnValueOnce(extractionB.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    const fetchB = startFetch(harness, 'https://example.com/b');
+    extractionB.resolve(newsData('B'));
+    await fetchB;
+    expect(updatePreview).toHaveBeenCalledTimes(1);
+    extractionA.resolve(newsData('A'));
+    await fetchA;
+
+    expect(updatePreview).toHaveBeenCalledTimes(1);
+  });
+
+  test('permite retry depois que a busca atual falha', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockRejectedValueOnce(new Error('falha atual'))
+      .mockResolvedValueOnce(newsData('B'));
+
+    await startFetch(harness, 'https://example.com/a');
+    expect(harness.elements.fetchDataBtn.disabled).toBe(false);
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('falha atual');
+
+    await startFetch(harness, 'https://example.com/b');
+    expect(harness.elements.customTitle.value).toBe('Título B');
+    expect(harness.elements.fetchDataBtn.disabled).toBe(false);
+    expect(harness.state()).toMatchObject({ lastNewsUrl: 'https://example.com/b' });
+  });
+
+  test('permite retry na mesma URL quando o cliente traduz a falha para objeto vazio', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce(newsData('B'));
+
+    await startFetch(harness, 'https://example.com/a');
+    expect(harness.state()).toMatchObject({ lastNewsUrl: null, lastNewsData: null });
+    expect(harness.elements.fetchDataBtn.disabled).toBe(false);
+    await startFetch(harness, 'https://example.com/a');
+    await startFetch(harness, 'https://example.com/a');
+
+    expect(harness.extractNewsData).toHaveBeenCalledTimes(2);
+    expect(harness.elements.customTitle.value).toBe('Título B');
+    expect(harness.state()).toMatchObject({
+      lastNewsUrl: 'https://example.com/a',
+      lastNewsData: newsData('B')
+    });
+    expect(JSON.parse(harness.run('JSON.stringify(resolvedImageFieldState)')))
+      .toEqual({
+        source: 'extracted',
+        value: newsData('B').bg,
+        newsUrl: 'https://example.com/a'
+      });
+    expect(harness.elements.fetchDataBtn.disabled).toBe(false);
+  });
+
+  test('resposta obsoleta vazia não altera cache nem UI de B', async () => {
+    const harness = createHarness();
+    const extractionA = createDeferred();
+    const extractionB = createDeferred();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.extractNewsData
+      .mockReturnValueOnce(extractionA.promise)
+      .mockReturnValueOnce(extractionB.promise);
+
+    const fetchA = startFetch(harness, 'https://example.com/a');
+    const fetchB = startFetch(harness, 'https://example.com/b');
+    extractionB.resolve(newsData('B'));
+    await fetchB;
+    extractionA.resolve({});
+    await fetchA;
+
+    expect(harness.elements.customTitle.value).toBe('Título B');
+    expect(harness.state()).toMatchObject({
+      lastNewsUrl: 'https://example.com/b',
+      lastNewsData: newsData('B')
+    });
+    expect(harness.elements.toastContainer.children).toHaveLength(1);
   });
 });
 

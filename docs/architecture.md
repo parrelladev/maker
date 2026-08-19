@@ -351,6 +351,19 @@ gera HTTP 500.
 No frontend, o resultado é guardado em `lastNewsData` e associado a
 `lastNewsUrl`. Ao buscar explicitamente, os campos manuais vazios são
 preenchidos com os valores extraídos antes de atualizar o preview.
+Somente resultados com conteúdo em ao menos um dos campos `h1`, `h2`, `chapeu`
+ou `bg` atualizam esse cache. `null`, `undefined` e objetos sem esses dados
+continuam chegando ao tratamento de erro do chamador, mas não substituem um
+cache válido nem impedem uma nova tentativa para a mesma URL.
+
+A busca explícita captura URL, template, página e versão da sessão do modal,
+além de um identificador monotônico próprio. O mesmo verificador de contexto é
+passado a `getOrExtractNewsData` e ao carregamento do preview. Se a URL ou o
+template mudar, o modal for fechado ou reaberto, ou outra busca começar, a
+operação anterior termina silenciosamente: não grava o cache, não preenche
+campos, não altera a proveniência da imagem, não atualiza o iframe nem exibe
+toast. Somente a busca ainda atual pode restaurar o botão; a edição da URL e a
+abertura de uma nova sessão restauram diretamente o controle da interface.
 
 ## Resolução e incorporação de imagens
 
@@ -596,12 +609,12 @@ chamada nem resultados nulos ou falhas de resolução.
   inicializado. A troca atualiza o título e solicita uma atualização do mesmo
   preview.
 - `getOrExtractNewsData` reaproveita `lastNewsData` somente quando
-  `lastNewsUrl === url` e os dados são truthy. Qualquer URL diferente faz nova
-  extração e substitui os dois valores. Não há TTL.
-- Chamadas diretas de `getOrExtractNewsData`, como o fluxo independente “Buscar
-  dados”, não fornecem guarda geral, cancelamento nem identificador de
-  requisição. Nelas, duas URLs concorrentes ainda podem atualizar o cache pela
-  ordem de conclusão; esse risco permanece fora do escopo desta tarefa.
+  `lastNewsUrl === url` e existe um resultado cacheado. Qualquer URL diferente
+  faz nova extração, mas os dois valores só são substituídos quando a resposta
+  contém `h1`, `h2`, `chapeu` ou `bg`. Não há TTL.
+- O fluxo independente “Buscar dados” fornece uma guarda com URL, template,
+  página, sessão e identificador monotônico. Duas buscas concorrentes só podem
+  atualizar o cache pela operação que ainda estiver atual.
 - Dentro de `generateArtWithPreviewFlow`, `getOrExtractNewsData` recebe uma
   guarda do contexto. Resultados resolvidos só atualizam o cache se URL,
   template, página, sessão e identificador de geração ainda forem atuais.

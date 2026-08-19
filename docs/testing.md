@@ -245,11 +245,10 @@ A suíte de `public/script.test.js` executa `public/script.js` em um contexto
 controlado com elementos DOM simulados. Ela caracteriza o snapshot normalizado
 do formulário e o estado global de template, tema, notícia, manifest e preview,
 incluindo abertura, fechamento e troca de template. O cache de notícias tem
-cobertura parcial: reutilização para a mesma URL, substituição para URL
-diferente e o comportamento atual de uma resposta atrasada são registrados. A
-chamada direta sem contexto ainda caracteriza que uma resposta atrasada pode
-substituir o cache. No fluxo de geração, testes separados confirmam que
-respostas obsoletas não atualizam o cache.
+cobertura para reutilização na mesma URL e substituição por URL diferente. A
+chamada direta sem contexto ainda caracteriza o contrato de associação do
+resultado à URL solicitada; os fluxos de busca explícita e geração passam um
+verificador e impedem que respostas obsoletas atualizem o cache.
 
 A mesma suíte cobre os caminhos de validação da geração na orquestração,
 incluindo mensagens, foco e ausência de efeitos assíncronos nas falhas iniciais,
@@ -267,6 +266,20 @@ de ordem. Os testes confirmam que somente o contexto mais novo pode alterar
 cache, categoria, preview e exportação. Outro caso altera campos durante a
 extração e demonstra que a geração usa o snapshot inicial, deixando as edições
 posteriores para a operação seguinte.
+
+No fluxo independente “Buscar dados da matéria”, Promises controladas cobrem A
+lenta/B rápida, A concluída antes de B, rejeição tardia de A, propriedade do
+loading do botão, fechamento e reabertura do modal, edição da URL durante a
+requisição, preservação da proveniência da imagem de B, ausência de uma segunda
+atualização do preview por A e retry após falha atual. Os casos confirmam que
+respostas obsoletas não alteram campos, cache, proveniência, iframe, toasts ou o
+botão pertencente à busca mais nova, sem usar temporizadores.
+
+O cache também é exercitado com `null`, `undefined`, objeto vazio e resultados
+parciais contendo isoladamente título, subtítulo, chapéu ou imagem. Os testes
+confirmam retry real na mesma URL depois de `{}`, cache após o retry válido,
+reutilização na terceira busca, preservação de cache válido anterior e da
+proveniência da imagem, além do descarte de resposta vazia obsoleta.
 
 Falhas injetadas em carregamento de manifest, incorporação da imagem,
 inicialização do preview e download confirmam ausência de sucesso, bloqueio das
