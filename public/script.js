@@ -627,7 +627,10 @@ async function ensurePreviewInitialized({
     ? manifestData.css.map(file => file.content || '').join('\n')
     : '';
 
-  const manifestJson = JSON.stringify(manifestData.manifest || {});
+  const manifestJson = JSON.stringify(manifestData.manifest || {})
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 
   const runtimeBootstrap = `
     (function () {

@@ -378,6 +378,113 @@ describe('runtime de bindings carregado por public/script.js', () => {
       .toBe(runtime.context.PreviewRuntime.update);
   });
 
+  test('rejeita readiness quando um payload enfileirado não pode ser aplicado', async () => {
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [
+        { selector: '[', field: 'title' }
+      ]
+    });
+    runtime.parentHarness.frameDocument.querySelectorAll = () => {
+      throw new Error('selector inválido');
+    };
+
+    runtime.runBootstrap();
+    runtime.update({ title: 'Não aplicado' });
+    runtime.loadRuntime();
+
+    await expect(runtime.initialization)
+      .rejects.toThrow('Falha ao inicializar o runtime do preview');
+    expect(runtime.parentHarness.state()).toMatchObject({
+      currentManifestData: null,
+      previewInitializedTemplate: null
+    });
+  });
+
+  test('permite retry depois de falha de binding durante readiness', async () => {
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [{ selector: '[', field: 'title' }]
+    });
+    runtime.parentHarness.frameDocument.querySelectorAll = () => {
+      throw new Error('selector inválido');
+    };
+    runtime.runBootstrap();
+    runtime.update({ title: 'Não aplicado' });
+    runtime.loadRuntime();
+    await expect(runtime.initialization).rejects.toThrow();
+
+    runtime.parentHarness.loadManifest.mockResolvedValue({
+      template: 'binding-fixture',
+      page: 'index',
+      manifest: {},
+      css: [],
+      html: ''
+    });
+    runtime.parentHarness.frameDocument.querySelectorAll = () => [];
+    const retryDocument = createDeferred();
+    runtime.parentHarness.frameDocument.write.mockImplementation(html => {
+      retryDocument.resolve(html);
+    });
+
+    const retry = runtime.parentHarness.run('ensurePreviewInitialized()');
+    const retryHtml = await retryDocument.promise;
+    const retryBootstrap = Array.from(
+      retryHtml.matchAll(/<script>([\s\S]*?)<\/script>/g),
+      match => match[1]
+    )[0];
+    vm.runInContext(retryBootstrap, runtime.context, {
+      filename: 'preview-runtime-retry-bootstrap.js'
+    });
+    runtime.context.document.head.children.at(-1).dispatch('load');
+
+    await expect(retry).resolves.toMatchObject({
+      template: 'binding-fixture',
+      page: 'index'
+    });
+    expect(runtime.parentHarness.state()).toMatchObject({
+      currentManifestData: expect.any(Object),
+      previewInitializedTemplate: 'binding-fixture'
+    });
+  });
+
+  test.each([
+    '</script>',
+    '</script><script>window.__manifestInjection = true</script>'
+  ])('escapa fechamento de script ao serializar o manifest: %s', async value => {
+    const target = new BindingElement();
+    const runtime = await createBindingRuntimeHarness({
+      bindings: [{ selector: '#title', value }]
+    }, {
+      '#title': [target]
+    });
+    const iframeHtml = runtime.parentHarness.frameDocument.write.mock.calls[0][0];
+
+    expect(iframeHtml).not.toContain(`"value":${JSON.stringify(value)}`);
+    runtime.runBootstrap();
+    runtime.loadRuntime();
+    await runtime.initialization;
+    runtime.update({});
+
+    expect(target.textContent).toBe(value);
+  });
+
+  test.each([
+    '<script>',
+    '\u2028',
+    '\u2029',
+    'aspas: " e barra: \\'
+  ])('mantém bootstrap sintaticamente válido com manifest contendo %s', async value => {
+    const target = new BindingElement();
+    const runtime = await createReadyBindingRuntimeHarness({
+      bindings: [{ selector: '#title', value }]
+    }, {
+      '#title': [target]
+    });
+
+    runtime.update({});
+
+    expect(target.textContent).toBe(value);
+  });
+
   test.each([
     ['carregamento', runtime => runtime.failRuntimeLoad()],
     ['inicialização', runtime => runtime.failRuntimeInitialization()],
@@ -618,6 +725,19 @@ describe('runtime de bindings carregado por public/script.js', () => {
     expect(runtime.documentElement.style.transformOrigin).toBe('top left');
     expect(runtime.documentElement.style.width).toBe('540px');
     expect(runtime.documentElement.style.height).toBe('960px');
+  });
+
+  test('propaga falha de escala quando ela ocorre durante update', async () => {
+    const runtime = await createReadyBindingRuntimeHarness({});
+    Object.defineProperty(runtime.documentElement.style, 'transformOrigin', {
+      configurable: true,
+      set() {
+        throw new Error('falha de escala');
+      }
+    });
+
+    expect(() => runtime.update({})).toThrow('Falha ao aplicar escala de preview');
+    expect(runtime.context.console.error).toHaveBeenCalled();
   });
 
   test('não registra listeners duplicados ao inicializar novamente', async () => {
@@ -1794,6 +1914,54 @@ describe('validacoes atuais da geracao', () => {
       'payload-applied',
       'download-started'
     ]);
+  });
+
+  test('bloqueia exportação quando a aplicação do payload final falha', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
+      throw new Error('binding final inválido');
+    });
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expectNoSuccessToast(harness);
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('Erro ao gerar arte: binding final inválido');
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('ignora falha de update pertencente a uma geração obsoleta', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('layout-hz')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria',
+      bg: 'data:image/png;base64,QQ=='
+    });
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
+      harness.run(`openModal('rede-gazeta')`);
+      throw new Error('binding da geração antiga');
+    });
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children).toHaveLength(0);
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'rede-gazeta',
+      currentManifestData: null,
+      previewInitializedTemplate: null
+    });
+    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
+    expect(harness.elements.generateBtn.disabled).toBe(false);
   });
 
   test.each(['carregamento', 'inicialização'])(

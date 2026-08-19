@@ -397,7 +397,9 @@ atual. Quando inicializa:
 
 1. carrega HTML, CSS, manifest e logo;
 2. concatena o CSS;
-3. serializa o manifest para a chamada de inicialização;
+3. serializa o manifest para a chamada de inicialização, escapando `<`, U+2028
+   e U+2029 para o contexto do script inline sem alterar os valores
+   reconstruídos pelo JavaScript;
 4. monta um documento HTML completo;
 5. define `<base href="/templates/<template>/<page>/">`;
 6. inclui o fragmento HTML do template;
@@ -420,10 +422,12 @@ Há duas escalas:
 
 O runtime publica `window.__updatePreview`. Enquanto o módulo está carregando,
 o bootstrap enfileira as atualizações e as aplica em ordem após a
-inicialização. A Promise `window.__previewRuntimeReady` só resolve depois da
-carga, validação, inicialização e drenagem dessa fila. Falha de carga, API
-inválida ou exceção da inicialização rejeita a Promise com uma mensagem estável
-e retorna ao tratamento de erro da página principal.
+inicialização. `PreviewRuntime.update` registra e propaga falhas de binding; por
+isso, a Promise `window.__previewRuntimeReady` só resolve depois da carga,
+validação, inicialização e aplicação sem erro de todos os itens da fila. Falha
+de carga, API inválida, exceção da inicialização ou falha durante a drenagem
+rejeita a Promise com uma mensagem estável e retorna ao tratamento de erro da
+página principal.
 
 `ensurePreviewInitialized` aguarda essa readiness e somente então publica
 `currentManifestData`, `previewInitializedTemplate` e
@@ -432,8 +436,9 @@ falha não deixa o iframe reutilizável e uma chamada posterior reinicia o
 processo. Tanto `updatePreview` quanto a geração montam o payload por
 `buildPreviewData` e o entregam a `applyArtworkDataToPreview`. Na geração, o
 runtime pronto precede a aplicação síncrona do payload final, que precede
-`downloadPreview`; preview e PNG observam o mesmo DOM. O placeholder é ocultado
-somente depois da readiness.
+`downloadPreview`; preview e PNG observam o mesmo DOM. Se a aplicação final
+falhar, o erro chega ao tratamento da geração e a exportação não é iniciada. O
+placeholder é ocultado somente depois da readiness.
 
 ## Bindings do manifest
 

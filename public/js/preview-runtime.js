@@ -115,7 +115,7 @@
       const designHeight = manifest?.dimensions?.height || 1920;
       const viewportWidth = global.innerWidth || document.documentElement.clientWidth;
       const viewportHeight = global.innerHeight || document.documentElement.clientHeight;
-      if (!viewportWidth || !viewportHeight) return;
+      if (!viewportWidth || !viewportHeight) return true;
 
       const scaleX = viewportWidth / designWidth;
       const scaleY = viewportHeight / designHeight;
@@ -137,8 +137,10 @@
         body.style.justifyContent = 'center';
         body.style.backgroundColor = '#000';
       }
+      return true;
     } catch (error) {
       console.error('Erro ao aplicar escala de preview:', error);
+      return false;
     }
   }
 
@@ -149,9 +151,12 @@
   function update(data) {
     try {
       applyBindings(data || {});
-      applyScale();
+      if (!applyScale()) {
+        throw new Error('Falha ao aplicar escala de preview');
+      }
     } catch (error) {
       console.error('Erro ao aplicar bindings no preview:', error);
+      throw error;
     }
   }
 

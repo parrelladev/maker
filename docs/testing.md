@@ -315,10 +315,13 @@ botão são restaurados.
 A suíte também executa o módulo estático `public/js/preview-runtime.js` pelo
 mesmo bootstrap escrito no iframe. Os testes caracterizam sua API explícita,
 readiness atrasada, drenagem ordenada da fila, falha de carregamento, falha de
-inicialização, nova tentativa, reutilização sem reinjeção ou listeners
-duplicados, escala e resize. A geração confirma a ordem entre runtime pronto,
-payload aplicado e início da exportação, além do descarte silencioso quando a
-readiness pertence a uma geração obsoleta. Os demais casos caracterizam texto,
+inicialização, rejeição e retry após falha de binding enfileirado, reutilização
+sem reinjeção ou listeners duplicados, escala e resize. A geração confirma a
+ordem entre runtime pronto, payload aplicado e início da exportação, bloqueia o
+download quando o payload final falha e descarta silenciosamente falhas de
+update de gerações obsoletas. A serialização do manifest cobre fechamento de
+script, reconstrução dos valores originais, `<script>`, aspas, barras
+invertidas, U+2028 e U+2029. Os demais casos caracterizam texto,
 HTML, imagem, as três formas de logo, variáveis CSS, classes, atributos, campos
 aninhados, valores fixos, valores e alvos ausentes, múltiplos alvos, arrays
 opcionais ausentes e atualizações repetidas.

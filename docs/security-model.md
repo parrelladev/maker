@@ -459,14 +459,17 @@ O iframe não possui `sandbox` e fica na mesma origem do documento principal.
   filesystem local controlado pela implantação.
 - **Defesa ausente:** `sandbox` no iframe.
 - **Defesa ausente:** CSP específica para o iframe ou documento principal.
-- **Defesa ausente:** escaping voltado ao contexto de `<script>` para strings do
-  manifest que possam conter `</script>`.
+- **Defesa existente:** antes da interpolação, a serialização JSON do manifest
+  escapa `<`, U+2028 e U+2029 com sequências JavaScript. Isso impede que
+  `</script>` vindo do manifest encerre o bootstrap e preserva o valor lógico
+  reconstruído pelo JavaScript.
 - **Defesa ausente:** sanitização do HTML e CSS do template.
 - **Risco dependente do ambiente:** se um atacante puder alterar templates ou
   manifests locais, o código já concede execução e acesso de mesma origem; o
   iframe não é uma fronteira de segurança.
-- **Hipótese a testar:** comportamento de strings de manifest contendo
-  sequências de fechamento de script e alcance ao `window.parent`.
+- **Limite da defesa:** templates e manifests locais continuam sendo conteúdo
+  confiável; o iframe permanece sem sandbox e HTML local pode executar scripts
+  e alcançar `window.parent`.
 
 O uso de `document.write` não recebe diretamente o HTML completo da notícia. A
 principal fronteira é a confiança nos arquivos locais e nas logos resolvidas.
