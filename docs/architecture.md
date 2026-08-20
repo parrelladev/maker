@@ -3,6 +3,19 @@
 Este documento descreve a arquitetura observada no código atual. Ele registra o
 comportamento existente; não define uma arquitetura-alvo.
 
+## Estado editorial central (fundacional)
+
+`public/js/editor-state.js` introduz `publication` como o futuro estado editorial
+central do Maker. O objeto mantém `brand` e `family`, um único `content`
+compartilhado com URL, título, subtítulo, tag e imagem, e configurações visuais
+independentes por formato. Feed e Story possuem separadamente variante, tema e
+ajustes de imagem.
+
+Estado transitório da interface, como formato aberto, sidebar, loading, toast,
+iframe ou identidade de operações assíncronas, não pertence a `publication`.
+O módulo é uma fundação de domínio sem dependência de DOM, templates ou
+marcas específicas e ainda não está integrado à interface existente.
+
 ## Finalidade da aplicação
 
 O Maker é uma aplicação web para produzir artes PNG a partir de templates
