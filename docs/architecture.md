@@ -452,8 +452,8 @@ a imagem. Data URLs não pertencem ao contrato da entrada manual; SVG, MIME
 genérico, payload vazio e formatos sem o marcador `;base64,` não pertencem ao
 contrato da imagem resolvida.
 
-O campo de imagem pode ser preenchido pelo usuário ou por
-`handleFetchNewsAndPreview`. Quando a extração preenche o campo, o frontend
+O campo de imagem pode ser preenchido pelo usuário ou pela importação do novo
+controller via `LegacyEditorBridge`. Quando a extração preenche o campo, a ponte
 registra a origem `extracted` junto com o valor exato em
 `resolvedImageFieldState`. O snapshot da geração só expõe esse conteúdo como
 `resolvedImage` enquanto origem e valor ainda correspondem ao campo; caso

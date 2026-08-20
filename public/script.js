@@ -25,7 +25,6 @@ let previewInitializationVersion = 0;
 // Estado técnico de sessão do renderer; a seleção editorial pertence à publication.
 let editorSessionVersion = 0;
 let latestGenerationId = 0;
-let latestNewsFetchId = 0;
 let latestBestEffortPreviewUpdateId = 0;
 let editorPreviewReady = true;
 let contentSyncPending = false;
@@ -46,7 +45,6 @@ const customImageUrl = document.getElementById('customImageUrl');
 const themeWrapper = document.getElementById('themeWrapper');
 const customTheme = document.getElementById('customTheme');
 const customTag = document.getElementById('customTag');
-const fetchDataBtn = document.getElementById('fetchDataBtn');
 const previewFrame = document.getElementById('previewFrame');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
 
@@ -106,34 +104,6 @@ function createGenerationContext(formData) {
   };
 }
 
-function createNewsFetchContext(formData) {
-  return {
-    fetchId: ++latestNewsFetchId,
-    editorSessionVersion,
-    page: currentPage,
-    template: formData.template,
-    url: formData.newsUrl
-  };
-}
-
-function isNewsFetchContextCurrent(context) {
-  return (
-    context.fetchId === latestNewsFetchId
-    && context.editorSessionVersion === editorSessionVersion
-    && context.template === currentTemplate
-    && context.page === currentPage
-    && context.url === normalizeOptionalValue(newsUrl.value)
-  );
-}
-
-function assertNewsFetchContextCurrent(context) {
-  if (isNewsFetchContextCurrent(context)) return;
-
-  const error = new Error('Busca de dados obsoleta');
-  error.code = STALE_OPERATION_CODE;
-  throw error;
-}
-
 function isGenerationContextCurrent(context) {
   return (
     context.generationId === latestGenerationId
@@ -191,9 +161,6 @@ function setupEventListeners() {
 
   newsUrl.addEventListener('input', () => {
     clearResolvedImageFieldState({ clearMatchingField: true });
-    if (fetchDataBtn) {
-      fetchDataBtn.disabled = false;
-    }
   });
 
   if (customTitle) {
@@ -257,79 +224,6 @@ function hasUsefulNewsData(data) {
     lastNewsData = data;
   }
   return data;
-}
-
-// Etapa 1: busca dados da matéria e monta o preview HTML
-async function handleFetchNewsAndPreview() {
-  const formData = readGenerationFormData();
-  const url = formData.newsUrl;
-
-  if (!formData.template) {
-    showToast('Escolha um template antes de buscar os dados', 'error');
-    return;
-  }
-
-  if (!url) {
-    showToast('Por favor, insira o link da notícia', 'error');
-    newsUrl.focus();
-    return;
-  }
-
-  if (!isHttpUrl(url)) {
-    showToast('Por favor, insira um link válido', 'error');
-    newsUrl.focus();
-    return;
-  }
-
-  const fetchContext = createNewsFetchContext(formData);
-  const assertCurrent = () => assertNewsFetchContextCurrent(fetchContext);
-
-  try {
-    if (fetchDataBtn) {
-      fetchDataBtn.disabled = true;
-    }
-
-    const extractedData = await getOrExtractNewsData(url, assertCurrent);
-    assertCurrent();
-
-    if (!extractedData || (!extractedData.h1 && !extractedData.h2 && !extractedData.bg)) {
-      showToast('Não foi possível extrair dados desta notícia.', 'error');
-      return;
-    }
-
-    const currentFormData = readGenerationFormData();
-
-    if (!currentFormData.manualTitle && extractedData.h1) {
-      customTitle.value = extractedData.h1;
-    }
-    if (!currentFormData.manualSubtitle && extractedData.h2) {
-      customSubtitle.value = extractedData.h2;
-    }
-    if (!currentFormData.manualCategory && extractedData.chapeu) {
-      customTag.value = extractedData.chapeu;
-    }
-    if (!currentFormData.manualImage && extractedData.bg) {
-      setExtractedImageFieldValue(extractedData.bg, url);
-    }
-
-    await updatePreview(null, assertCurrent);
-    assertCurrent();
-
-    showToast('Dados da notícia carregados. Ajuste o texto se quiser.', 'success');
-  } catch (error) {
-    if (
-      isStaleOperationError(error)
-      || !isNewsFetchContextCurrent(fetchContext)
-    ) {
-      return;
-    }
-    console.error('Erro ao buscar dados da notícia:', error);
-    showToast('Erro ao buscar dados da notícia: ' + error.message, 'error');
-  } finally {
-    if (fetchDataBtn && isNewsFetchContextCurrent(fetchContext)) {
-      fetchDataBtn.disabled = false;
-    }
-  }
 }
 
 // Monta o HTML/CSS do template dentro do iframe de preview reaproveitando o manifest.
