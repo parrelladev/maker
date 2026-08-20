@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const EditorUi = require('./js/editor-ui');
+const EditorState = require('./js/editor-state');
+const EditorCatalog = require('./js/editor-catalog');
 
 function createDeferred() {
   let resolve;
@@ -765,6 +768,115 @@ describe('runtime de bindings carregado por public/script.js', () => {
     expect(target.textContent).toBe('Preview reutilizado');
   });
 });
+
+test('publication flows through real controller and bridge to iframe DOM and same-frame export', async () => {
+  const image = new BindingElement('img');
+  const manifest = {
+    dimensions: { width: 1080, height: 1920 },
+    formats: {
+      feed: { capabilities: { imageAdjustments: { zoom: false, position: false } } },
+      story: { capabilities: { imageAdjustments: { zoom: true, position: true } } },
+    },
+    bindings: [{ selector: '#bg', type: 'image', field: 'resolvedBg' }],
+  };
+  const runtime = await createReadyBindingRuntimeHarness(manifest, { '#bg': [image] });
+  const parent = runtime.parentHarness;
+  parent.run(`currentFormat = 'story'`);
+  const elements = {
+    brand: new BindingElement(), family: new BindingElement(),
+    variants: new BindingElement(), themes: new BindingElement(),
+    status: new BindingElement(), download: parent.elements.generateBtn,
+    importNews: parent.elements.fetchDataBtn, imageAdjustments: new BindingElement(),
+    resetImageAdjustments: new BindingElement(), newArtwork: new BindingElement(),
+  };
+  elements.status.statusText = new BindingElement();
+  elements.status.querySelector = selector => selector === 'span:last-child' ? elements.status.statusText : null;
+  const fields = [
+    ['url', parent.elements.newsUrl], ['title', parent.elements.customTitle],
+    ['subtitle', parent.elements.customSubtitle], ['tag', parent.elements.customTag],
+    ['image', parent.elements.customImageUrl],
+  ].map(([name, field]) => { field.dataset.field = name; return field; });
+  const sliders = ['zoom', 'x', 'y'].map(name => {
+    const input = new BindingElement('input'); input.dataset.imageAdjustment = name; return input;
+  });
+  const outputs = Object.fromEntries(['zoom', 'x', 'y'].map(name => [name, new BindingElement('output')]));
+  const selectors = {
+    '[data-control="brand"]': elements.brand,
+    '[data-control="family"]': elements.family,
+    '[data-control="variants"]': elements.variants,
+    '[data-control="themes"]': elements.themes,
+    '[data-editor-status]': elements.status,
+    '[data-action="download-current"]': elements.download,
+    '[data-action="import-news"]': elements.importNews,
+    '[data-control="image-adjustments"]': elements.imageAdjustments,
+    '[data-action="reset-image-adjustments"]': elements.resetImageAdjustments,
+    '[data-action="new-artwork"]': elements.newArtwork,
+  };
+  fields.forEach(field => { selectors[`[data-field="${field.dataset.field}"]`] = field; });
+  const controllerDocument = {
+    querySelector(selector) {
+      const output = selector.match(/^\[data-value-for="(.+)"\]$/);
+      return output ? outputs[output[1]] : selectors[selector] || null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-field]') return fields;
+      if (selector === '[data-image-adjustment]') return sliders;
+      return [];
+    },
+    createElement: tag => new BindingElement(tag),
+  };
+  const catalog = { brands: [{ id: 'brand-x', name: 'Brand X', families: [{
+    id: 'family-x', label: 'Family X', variants: [{
+      id: 'variant-x', label: 'Variant X', formats: [{
+        id: 'story', themes: [],
+        capabilities: { imageAdjustments: { zoom: true, position: true } },
+      }],
+    }],
+  }] }] };
+  const controller = EditorUi.createEditorController({
+    document: controllerDocument,
+    api: {
+      getEditorCatalog: jest.fn().mockResolvedValue(catalog),
+      resolveEditorRenderer: jest.fn().mockResolvedValue({
+        template: 'binding-fixture', page: 'index', themes: [],
+        capabilities: { imageAdjustments: { zoom: true, position: true } },
+      }),
+    },
+    state: EditorState,
+    catalogHelpers: EditorCatalog,
+    frontendUtils: {
+      normalizeOptionalValue: value => typeof value === 'string' ? value.trim() : '',
+      isHttpUrl: value => /^https?:\/\//.test(value),
+    },
+    legacyBridge: {
+      ...parent.context.LegacyEditorBridge,
+      selectRenderer: jest.fn().mockResolvedValue(),
+    },
+  });
+  await controller.initialize();
+  for (const [index, value] of [[0, '1.5'], [1, '25'], [2, '80']]) {
+    sliders[index].value = value;
+    sliders[index].dispatch('input');
+  }
+  await controller.syncPublicationContentToPreview();
+
+  expect(controller.getPublication().formats.story.imageAdjustments)
+    .toEqual({ zoom: 1.5, x: 25, y: 80 });
+  expect(image.style).toMatchObject({
+    objectPosition: '25% 80%', transformOrigin: '25% 80%', transform: 'scale(1.5)',
+  });
+  await parent.context.PreviewExport.downloadPreview(
+    parent.elements.previewFrame,
+    parent.run('currentManifestData'),
+    'integrated.png'
+  );
+  expect(parent.context.PreviewExport.downloadPreview).toHaveBeenCalledWith(
+    parent.elements.previewFrame,
+    expect.anything(),
+    'integrated.png'
+  );
+  expect(image.style.transform).toBe('scale(1.5)');
+});
 describe('readiness editorial e exportação legada', () => {
   test('bridge de importação delega à infraestrutura de extração e cache', async () => {
     const harness = createHarness();
@@ -1365,6 +1477,7 @@ describe('precedência dos dados usados na arte', () => {
     expect(buildData(harness)).toMatchObject({
       h1: '',
       h2: '',
+      imageAdjustments: { zoom: 1, x: 50, y: 50 },
       tag: '',
       chapeu: null,
       bg: '',
@@ -1453,6 +1566,7 @@ describe('precedência dos dados usados na arte', () => {
     expect(buildData(harness)).toEqual({
       h1: '',
       h2: '',
+      imageAdjustments: { zoom: 1, x: 50, y: 50 },
       tag: '',
       chapeu: null,
       bg: '',

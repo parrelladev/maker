@@ -65,6 +65,12 @@
           <div class="current-image" data-current-image><span aria-hidden="true">Imagem</span><p>Nenhuma imagem selecionada</p></div>
           <div class="field-group"><label for="customImageUrl">URL da imagem</label><input type="url" id="customImageUrl" data-field="image" placeholder="Usar imagem importada"></div>
           <button class="button button-secondary button-full" type="button" data-action="replace-image">Trocar imagem</button>
+          <div class="image-adjustments" data-control="image-adjustments" hidden>
+            <div class="range-field"><label for="imageZoom">Zoom <output data-value-for="zoom">1</output></label><input type="range" id="imageZoom" data-image-adjustment="zoom" min="1" max="3" step="0.05" value="1"></div>
+            <div class="range-field"><label for="imagePositionX">Horizontal <output data-value-for="x">50</output></label><input type="range" id="imagePositionX" data-image-adjustment="x" min="0" max="100" step="1" value="50"></div>
+            <div class="range-field"><label for="imagePositionY">Vertical <output data-value-for="y">50</output></label><input type="range" id="imagePositionY" data-image-adjustment="y" min="0" max="100" step="1" value="50"></div>
+            <button class="button button-secondary button-full" type="button" data-action="reset-image-adjustments">Redefinir enquadramento</button>
+          </div>
         </section>
       </aside>
 

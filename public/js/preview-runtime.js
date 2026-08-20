@@ -109,6 +109,37 @@
     });
   }
 
+  function applyImageAdjustments(data) {
+    const formats = manifest?.formats && typeof manifest.formats === 'object'
+      ? manifest.formats
+      : {};
+    const formatIds = Object.keys(formats);
+    const activeFormat = typeof data?.activeFormat === 'string' && data.activeFormat
+      ? data.activeFormat
+      : (formatIds.length === 1 ? formatIds[0] : null);
+    const formatCapabilities = activeFormat ? formats[activeFormat]?.capabilities : null;
+    const supported = formatCapabilities?.imageAdjustments || {};
+    const adjustments = data?.imageAdjustments || {};
+    const numericAdjustment = (key, fallback) => (
+      typeof adjustments[key] === 'number' && Number.isFinite(adjustments[key])
+        ? adjustments[key]
+        : fallback
+    );
+    const imageBindings = Array.isArray(manifest.bindings)
+      ? manifest.bindings.filter(binding => binding?.type === 'image' && binding.selector)
+      : [];
+    imageBindings.forEach(binding => {
+      Array.from(document.querySelectorAll(binding.selector)).forEach(element => {
+        const x = supported.position === true ? numericAdjustment('x', 50) : 50;
+        const y = supported.position === true ? numericAdjustment('y', 50) : 50;
+        const zoom = supported.zoom === true ? numericAdjustment('zoom', 1) : 1;
+        element.style.objectPosition = `${x}% ${y}%`;
+        element.style.transformOrigin = `${x}% ${y}%`;
+        element.style.transform = `scale(${zoom})`;
+      });
+    });
+  }
+
   function applyScale() {
     try {
       const designWidth = manifest?.dimensions?.width || 1080;
@@ -151,6 +182,7 @@
   function update(data) {
     try {
       applyBindings(data || {});
+      applyImageAdjustments(data || {});
       if (!applyScale()) {
         throw new Error('Falha ao aplicar escala de preview');
       }

@@ -12,6 +12,7 @@ class FakeElement {
     this.disabled = false;
     this.value = '';
     this.textContent = '';
+    this.hidden = false;
   }
   set innerHTML(_value) { this.children = []; }
   get innerHTML() { return ''; }
@@ -27,35 +28,46 @@ function fixture() {
     brand: new FakeElement(), family: new FakeElement(), variants: new FakeElement(), themes: new FakeElement(),
     status: new FakeElement(), newArtwork: new FakeElement(), feed: new FakeElement(), compare: new FakeElement(),
     downloadCurrent: new FakeElement(), importNews: new FakeElement(),
+    imageAdjustments: new FakeElement(), resetImageAdjustments: new FakeElement(),
   };
   elements.status.statusText = new FakeElement();
   const fields = ['url', 'title', 'subtitle', 'tag', 'image'].map(name => {
     const field = new FakeElement(); field.dataset.field = name; return field;
   });
+  const adjustmentInputs = ['zoom', 'x', 'y'].map(name => {
+    const input = new FakeElement(); input.dataset.imageAdjustment = name; return input;
+  });
+  const adjustmentOutputs = Object.fromEntries(['zoom', 'x', 'y'].map(name => [name, new FakeElement()]));
   const selectors = {
     '[data-control="brand"]': elements.brand, '[data-control="family"]': elements.family,
     '[data-control="variants"]': elements.variants, '[data-control="themes"]': elements.themes,
     '[data-editor-status]': elements.status, '[data-action="new-artwork"]': elements.newArtwork,
     '[data-action="download-current"]': elements.downloadCurrent,
     '[data-action="import-news"]': elements.importNews,
+    '[data-control="image-adjustments"]': elements.imageAdjustments,
+    '[data-action="reset-image-adjustments"]': elements.resetImageAdjustments,
   };
   fields.forEach(field => { selectors[`[data-field="${field.dataset.field}"]`] = field; });
   const document = {
-    querySelector: selector => selectors[selector] || null,
+    querySelector: selector => {
+      const output = selector.match(/^\[data-value-for="(.+)"\]$/);
+      return output ? adjustmentOutputs[output[1]] : selectors[selector] || null;
+    },
     querySelectorAll: selector => {
       if (selector === '[data-field]') return fields;
+      if (selector === '[data-image-adjustment]') return adjustmentInputs;
       if (selector.includes('data-view-mode')) return [elements.feed, elements.compare];
       return [];
     },
     createElement: () => new FakeElement(),
   };
-  return { document, elements, fields };
+  return { document, elements, fields, adjustmentInputs, adjustmentOutputs };
 }
 
 const syntheticCatalog = { brands: [{ id: 'brand-x', name: 'Brand X', families: [{
   id: 'family-y', label: 'family-y', variants: [
     { id: 'feed-only', label: 'Feed only', formats: [{ id: 'feed', themes: [] }] },
-    { id: 'variant-z', label: 'Variant Z', formats: [{ id: 'story', themes: [{ id: 'green', label: 'Green' }, { id: 'black', label: 'Black' }] }] },
+    { id: 'variant-z', label: 'Variant Z', formats: [{ id: 'story', capabilities: { imageAdjustments: { zoom: true, position: true } }, themes: [{ id: 'green', label: 'Green' }, { id: 'black', label: 'Black' }] }] },
     { id: 'variant-q', label: 'Variant Q', formats: [{ id: 'story', themes: [{ id: 'white', label: 'White' }] }] },
   ],
 }, { id: 'family-two', label: 'family-two', variants: [
@@ -98,6 +110,70 @@ function setup(overrides = {}) {
 }
 
 describe('controller/UI editorial', () => {
+  test('mostra controles suportados, altera publication e reseta sem resolver renderer', async () => {
+    const harness = setup();
+    await harness.controller.initialize();
+    expect(harness.elements.imageAdjustments.hidden).toBe(false);
+    const resolveCalls = harness.api.resolveEditorRenderer.mock.calls.length;
+    for (const [index, value] of [[0, '1.5'], [1, '25'], [2, '80']]) {
+      harness.adjustmentInputs[index].value = value;
+      await harness.adjustmentInputs[index].dispatch('input');
+    }
+    await Promise.resolve();
+    expect(harness.controller.getPublication().formats.story.imageAdjustments)
+      .toEqual({ zoom: 1.5, x: 25, y: 80 });
+    expect(harness.legacyBridge.applyPublicationContent).toHaveBeenLastCalledWith(expect.objectContaining({
+      imageAdjustments: { zoom: 1.5, x: 25, y: 80 },
+    }));
+    expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(resolveCalls);
+    await harness.controller.resetCurrentImageAdjustments();
+    expect(harness.controller.getPublication().formats.story.imageAdjustments)
+      .toEqual({ zoom: 1, x: 50, y: 50 });
+  });
+
+  test('oculta ajustes sem capability e preserva valores ao trocar variant e theme', async () => {
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.adjustmentInputs[0].value = '1.4';
+    await harness.adjustmentInputs[0].dispatch('input');
+    await harness.controller.selectVariant('variant-q');
+    expect(harness.elements.imageAdjustments.hidden).toBe(true);
+    expect(harness.controller.getPublication().formats.story.imageAdjustments.zoom).toBe(1.4);
+    harness.controller.selectTheme('white');
+    expect(harness.controller.getPublication().formats.story.imageAdjustments.zoom).toBe(1.4);
+    await harness.controller.selectVariant('variant-z');
+    expect(harness.elements.imageAdjustments.hidden).toBe(false);
+    expect(harness.adjustmentInputs[0].value).toBe('1.4');
+  });
+
+  test('slider stale nÃ£o reaplica valor antigo nem libera download cedo', async () => {
+    let finishFirst; let finishSecond; let runtimeZoom = 1;
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.legacyBridge.applyPublicationContent.mockReset()
+      .mockImplementationOnce(({ imageAdjustments, assertCurrent }) => new Promise(resolve => {
+        finishFirst = () => {
+          try { assertCurrent(); runtimeZoom = imageAdjustments.zoom; resolve(); }
+          catch (error) { resolve(Promise.reject(error)); }
+        };
+      }))
+      .mockImplementationOnce(({ imageAdjustments, assertCurrent }) => new Promise(resolve => {
+        finishSecond = () => { assertCurrent(); runtimeZoom = imageAdjustments.zoom; resolve(); };
+      }));
+    harness.adjustmentInputs[0].value = '1.1';
+    await harness.adjustmentInputs[0].dispatch('input');
+    harness.adjustmentInputs[0].value = '1.2';
+    await harness.adjustmentInputs[0].dispatch('input');
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+    finishSecond(); await Promise.resolve(); await Promise.resolve();
+    expect(runtimeZoom).toBe(1.2);
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+    finishFirst(); await Promise.resolve(); await Promise.resolve();
+    expect(runtimeZoom).toBe(1.2);
+    expect(harness.controller.getPublication().formats.story.imageAdjustments.zoom).toBe(1.2);
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
   test('catálogo sintético preenche controles e publication sem conhecer A Gazeta', async () => {
     const harness = setup();
     await harness.controller.initialize();
@@ -117,6 +193,7 @@ describe('controller/UI editorial', () => {
     });
     expect(harness.legacyBridge.selectRenderer).toHaveBeenCalledWith(expect.objectContaining({
       renderer: expect.objectContaining({ template: 'renderer-z', page: 'index' }),
+      activeFormat: 'story',
       theme: 'green',
     }));
   });
@@ -271,7 +348,12 @@ describe('controller/UI editorial', () => {
     harness.fields[1].value = 'Título'; await harness.fields[1].dispatch('input');
     await harness.controller.selectVariant('variant-q');
     await harness.elements.newArtwork.dispatch('click');
-    expect(harness.controller.getPublication()).toMatchObject({ content: { title: '' }, formats: { story: { variant: 'variant-z', theme: 'green' } } });
+    expect(harness.controller.getPublication()).toMatchObject({
+      content: { title: '' },
+      formats: { story: {
+        variant: 'variant-z', theme: 'green', imageAdjustments: { zoom: 1, x: 50, y: 50 },
+      } },
+    });
     expect(harness.api.getEditorCatalog).toHaveBeenCalledTimes(1);
     expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
       renderer: expect.objectContaining({ template: 'renderer-z' }),
@@ -493,5 +575,34 @@ describe('controller/UI editorial', () => {
     expect(harness.elements.status.statusText.textContent).toBe('Pronto');
     expect(harness.disableReasons.has('content-sync')).toBe(false);
     expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('import, manual image and framing reset preserve their separate state', async () => {
+    const harness = setup();
+    await harness.controller.initialize();
+    for (const [index, value] of [[0, '1.6'], [1, '30'], [2, '70']]) {
+      harness.adjustmentInputs[index].value = value;
+      await harness.adjustmentInputs[index].dispatch('input');
+    }
+    harness.fields[0].value = 'https://example.com/news';
+    await harness.fields[0].dispatch('input');
+    await harness.controller.importNews();
+    expect(harness.controller.getPublication().formats.story.imageAdjustments)
+      .toEqual({ zoom: 1.6, x: 30, y: 70 });
+
+    harness.fields[4].value = 'https://example.com/manual.jpg';
+    await harness.fields[4].dispatch('input');
+    const beforeReset = harness.controller.getPublication();
+    await harness.controller.resetCurrentImageAdjustments();
+    expect(harness.controller.getPublication()).toMatchObject({
+      brand: beforeReset.brand,
+      family: beforeReset.family,
+      content: beforeReset.content,
+      formats: { story: {
+        variant: beforeReset.formats.story.variant,
+        theme: beforeReset.formats.story.theme,
+        imageAdjustments: { zoom: 1, x: 50, y: 50 },
+      } },
+    });
   });
 });

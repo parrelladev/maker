@@ -21,12 +21,27 @@ function selectionKey({ brand, family, variant, format }) {
   return JSON.stringify([brand, family, variant, format]);
 }
 
-function rendererRef(template, page, dimensions, themes) {
+function cloneCapabilities(capabilities = {}) {
+  return {
+    ...(capabilities.imageAdjustments
+      ? { imageAdjustments: { ...capabilities.imageAdjustments } }
+      : {}),
+  };
+}
+
+function capabilitiesProperty(capabilities) {
+  return capabilities && Object.keys(capabilities).length
+    ? { capabilities: cloneCapabilities(capabilities) }
+    : {};
+}
+
+function rendererRef(template, page, dimensions, themes, capabilities) {
   return {
     template,
     page,
     dimensions: { ...dimensions },
     themes: themes.map(theme => ({ ...theme })).sort(compareIds),
+    ...capabilitiesProperty(capabilities),
   };
 }
 
@@ -108,7 +123,8 @@ async function buildEditorCatalog({
           templateEntry.template,
           pageEntry.name,
           formatMetadata.dimensions,
-          metadata.themes
+          metadata.themes,
+          formatMetadata.capabilities
         );
         const existing = rendererIndex.get(key);
         if (existing && !sameRendererRef(existing, reference)) {
@@ -125,6 +141,7 @@ async function buildEditorCatalog({
             id: format,
             dimensions: { ...formatMetadata.dimensions },
             themes: metadata.themes.map(theme => ({ ...theme })).sort(compareIds),
+            ...capabilitiesProperty(formatMetadata.capabilities),
           });
         }
       }
@@ -171,6 +188,7 @@ function resolveRenderer(catalog, selection) {
     page: reference.page,
     dimensions: { ...reference.dimensions },
     themes: reference.themes.map(theme => ({ ...theme })),
+    ...capabilitiesProperty(reference.capabilities),
   };
 }
 

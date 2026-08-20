@@ -16,6 +16,24 @@ function editorialManifest(overrides = {}) {
 }
 
 describe('templateManifest', () => {
+  test('normaliza capabilities de ajuste de imagem por formato', () => {
+    const input = editorialManifest();
+    input.formats.story.capabilities = { imageAdjustments: { zoom: true, position: true } };
+    expect(getEditorialMetadata(input).formats.story.capabilities).toEqual({
+      imageAdjustments: { zoom: true, position: true },
+    });
+  });
+
+  test.each([
+    [{ imageAdjustments: 'yes' }, 'imageAdjustments deve ser um objeto'],
+    [{ imageAdjustments: { zoom: 'yes' } }, 'zoom deve ser booleano'],
+    [{ imageAdjustments: { rotation: true } }, 'rotation nÃ£o Ã© suportado'],
+    [{ cropper: {} }, 'cropper nÃ£o Ã© suportada'],
+  ])('rejeita capability invÃ¡lida %#', (capabilities, message) => {
+    const input = editorialManifest();
+    input.formats.story.capabilities = capabilities;
+    expect(() => validateManifest(input)).toThrow(message);
+  });
   test('aceita e normaliza manifest legado com dimensions', () => {
     const manifest = { dimensions: { width: 1080, height: 1920 } };
     expect(validateManifest(manifest)).toBe(manifest);
@@ -132,7 +150,10 @@ describe('templateManifest', () => {
       brand: 'agazeta', family: 'padrao', variant: 'foto-abaixo', label: 'Foto abaixo',
     });
     expect(normalized.formats).toEqual({
-      story: { dimensions: { width: 1080, height: 1920 } },
+      story: {
+        dimensions: { width: 1080, height: 1920 },
+        capabilities: { imageAdjustments: { zoom: true, position: true } },
+      },
     });
     expect(normalized.themes).toEqual([
       { id: 'azul', label: 'Azul' },

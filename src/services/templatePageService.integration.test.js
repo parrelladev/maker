@@ -21,7 +21,10 @@ describe('renderers editoriais reais da A Gazeta', () => {
     ]));
     for (const variant of ['foto-acima', 'foto-abaixo']) {
       expect(family.variants.find(({ id }) => id === variant).formats).toEqual([{
-        id: 'story', dimensions: { width: 1080, height: 1920 }, themes: THEMES,
+        id: 'story',
+        dimensions: { width: 1080, height: 1920 },
+        themes: THEMES,
+        capabilities: { imageAdjustments: { zoom: true, position: true } },
       }]);
     }
 

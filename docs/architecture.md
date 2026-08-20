@@ -1,5 +1,34 @@
 # Arquitetura atual do Maker
 
+## Capabilities editoriais e enquadramento de imagem
+
+Capabilities sÃ£o metadata declarativa de cada formato do renderer. A forma
+normalizada aceita `imageAdjustments.zoom` e `imageAdjustments.position`, ambos
+booleanos; manifests legados e formatos sem `capabilities` continuam vÃ¡lidos.
+Chaves desconhecidas ou tipos invÃ¡lidos sÃ£o rejeitados. A metadata semÃ¢ntica Ã©
+publicada no formato do catÃ¡logo e repetida pelo resolver, sem paths, selectors
+ou detalhes de CSS, de modo que a UI nÃ£o possui branches por variant.
+
+O enquadramento pertence a `publication.formats.<format>.imageAdjustments`, com
+defaults numÃ©ricos `{ zoom: 1, x: 50, y: 50 }`, zoom entre 1 e 3 e X/Y entre 0
+e 100. Trocas de variant, theme, notÃ­cia ou URL manual da imagem preservam os
+valores. **Nova arte** e **Redefinir enquadramento** restauram os defaults; Feed
+ainda nÃ£o expÃµe controles.
+
+O snapshot versionado enviado ao preview agrupa `imageAdjustments` com o
+conteÃºdo e identifica explicitamente o formato ativo. O runtime consulta
+`manifest.formats[activeFormat]` e nunca escolhe capabilities pela ordem das
+chaves; manifests multi-formato permanecem determinÃ­sticos. Capabilities
+editoriais sÃ£o sempre obtidas do formato resolvido;
+propriedades top-level do manifest nÃ£o participam dessa resoluÃ§Ã£o. Para compatibilidade
+tÃ©cnica, um manifest monoformato pode usar sua Ãºnica chave quando o formato nÃ£o
+for informado; com zero ou mÃºltiplos formatos, a ausÃªncia do formato desabilita
+a capability. Enquanto o iframe real nÃ£o recebe o snapshot atual, `content-sync`
+bloqueia a exportaÃ§Ã£o e conclusÃµes stale nÃ£o alteram readiness. O runtime usa os
+bindings declarativos do tipo `image` para aplicar `object-position`, `scale` e
+`transform-origin` somente Ã imagem. O mesmo DOM do iframe continua sendo a
+fonte da exportaÃ§Ã£o.
+
 ## Shell do editor em tela única
 
 A interface principal em `public/index.html` usa um shell de tela única com

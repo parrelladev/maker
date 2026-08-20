@@ -173,6 +173,12 @@ describe('editor-state', () => {
       .toThrow('Unknown image adjustment: rotation');
   });
 
+  test.each([
+    ['zoom', 0.99], ['zoom', 3.01], ['x', -1], ['x', 101], ['y', Infinity], ['y', NaN],
+  ])('rejeita %s fora dos limites editoriais', (key, value) => {
+    expect(() => setImageAdjustment(createPublication(), 'story', key, value)).toThrow();
+  });
+
   test('opera sobre um formato adicional sem regras especificas de Feed ou Story', () => {
     const publication = createPublication();
     const extended = {

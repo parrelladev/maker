@@ -59,6 +59,17 @@ function getVariant(catalog, brand = 'brand-a', family = 'padrao', variant = 'fo
 }
 
 describe('editorCatalog', () => {
+  test('propaga capabilities no catÃ¡logo e no resolve sem expor paths', async () => {
+    const input = manifest();
+    input.formats.story.capabilities = { imageAdjustments: { zoom: true, position: true } };
+    const catalog = await build([page('renderer-a', 'story-page', input)]);
+    const format = getVariant(catalog).formats[0];
+    expect(format.capabilities).toEqual({ imageAdjustments: { zoom: true, position: true } });
+    expect(format).not.toHaveProperty('template');
+    expect(resolveRenderer(catalog, {
+      brand: 'brand-a', family: 'padrao', variant: 'foto-acima', format: 'story',
+    }).capabilities).toEqual({ imageAdjustments: { zoom: true, position: true } });
+  });
   test('constrói catálogo vazio sem manifests editoriais', async () => {
     await expect(build([])).resolves.toEqual({ brands: [] });
   });

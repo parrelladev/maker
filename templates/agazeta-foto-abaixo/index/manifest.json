@@ -8,7 +8,8 @@
   },
   "formats": {
     "story": {
-      "dimensions": { "width": 1080, "height": 1920 }
+      "dimensions": { "width": 1080, "height": 1920 },
+      "capabilities": { "imageAdjustments": { "zoom": true, "position": true } }
     }
   },
   "themes": [

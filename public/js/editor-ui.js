@@ -22,6 +22,8 @@
       status: document.querySelector('[data-editor-status]'),
       downloadCurrent: document.querySelector('[data-action="download-current"]'),
       importNews: document.querySelector('[data-action="import-news"]'),
+      imageAdjustments: document.querySelector('[data-control="image-adjustments"]'),
+      resetImageAdjustments: document.querySelector('[data-action="reset-image-adjustments"]'),
     };
 
     function setStatus(message) {
@@ -72,12 +74,15 @@
     } = {}) {
       const syncId = ++latestContentSyncId;
       const content = { ...publication.content };
+      const imageAdjustments = { ...publication.formats[ACTIVE_FORMAT].imageAdjustments };
       const assertSyncCurrent = () => assertContentSyncCurrent(syncId, assertCurrent);
       legacyBridge?.setContentSyncPending?.(true);
       if (pendingStatus) setStatus(pendingStatus);
 
       try {
-        await legacyBridge.applyPublicationContent({ content, importedImage, assertCurrent: assertSyncCurrent });
+        await legacyBridge.applyPublicationContent({
+          content, imageAdjustments, importedImage, assertCurrent: assertSyncCurrent
+        });
         assertSyncCurrent();
         legacyBridge?.setContentSyncPending?.(false);
         if (readyStatus) setStatus(readyStatus);
@@ -226,6 +231,37 @@
         'themeId',
         selectTheme
       );
+      renderImageAdjustments(format?.capabilities);
+    }
+
+    function renderImageAdjustments(capabilities = {}) {
+      const supported = capabilities?.imageAdjustments || {};
+      const visible = supported.zoom === true || supported.position === true;
+      if (controls.imageAdjustments) controls.imageAdjustments.hidden = !visible;
+      document.querySelectorAll('[data-image-adjustment]').forEach(input => {
+        const key = input.dataset.imageAdjustment;
+        input.disabled = !(key === 'zoom' ? supported.zoom === true : supported.position === true);
+        input.value = String(publication.formats[ACTIVE_FORMAT].imageAdjustments[key]);
+        const output = document.querySelector(`[data-value-for="${key}"]`);
+        if (output) output.value = input.value;
+      });
+      if (controls.resetImageAdjustments) controls.resetImageAdjustments.disabled = !visible;
+    }
+
+    function updateImageAdjustment(input) {
+      publication = state.setImageAdjustment(
+        publication, ACTIVE_FORMAT, input.dataset.imageAdjustment, Number(input.value)
+      );
+      renderImageAdjustments(currentNodes().format?.capabilities);
+      syncPublicationContentToPreview().catch(error => {
+        if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar enquadramento:', error);
+      });
+    }
+
+    function resetCurrentImageAdjustments() {
+      publication = state.resetImageAdjustments(publication, ACTIVE_FORMAT);
+      renderImageAdjustments(currentNodes().format?.capabilities);
+      return syncPublicationContentToPreview();
     }
 
     async function resolvePreview() {
@@ -245,7 +281,9 @@
         if (legacyBridge) {
           await legacyBridge.selectRenderer({
             renderer: resolved,
+            activeFormat: ACTIVE_FORMAT,
             theme: publication.formats.story.theme,
+            imageAdjustments: { ...publication.formats.story.imageAdjustments },
             assertCurrent: () => {
               if (requestId !== latestRendererRequest) {
                 const error = new Error('Renderer obsoleto');
@@ -333,6 +371,9 @@
         if (event.key === 'Enter') importNews();
       });
       controls.importNews?.addEventListener('click', importNews);
+      document.querySelectorAll('[data-image-adjustment]')
+        .forEach(input => input.addEventListener('input', () => updateImageAdjustment(input)));
+      controls.resetImageAdjustments?.addEventListener('click', resetCurrentImageAdjustments);
       document.querySelector('[data-action="new-artwork"]')?.addEventListener('click', () => reset());
       document.querySelectorAll('[data-view-mode="feed"], [data-view-mode="compare"]')
         .forEach(button => button.addEventListener('click', () => setStatus('Em breve')));
@@ -385,6 +426,7 @@
       selectFamily,
       selectTheme,
       selectVariant,
+      resetCurrentImageAdjustments,
       getPublication: () => publication,
       getRenderer: () => renderer,
       getPreviewState: () => previewState,

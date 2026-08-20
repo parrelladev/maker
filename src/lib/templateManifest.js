@@ -47,6 +47,41 @@ function validateThemes(themes) {
   }
 }
 
+function validateCapabilities(capabilities, field) {
+  if (capabilities === undefined) return;
+  if (!isObject(capabilities)) {
+    throw new TemplateManifestSchemaError(`${field} deve ser um objeto`);
+  }
+  const knownCapabilities = new Set(['imageAdjustments']);
+  for (const capability of Object.keys(capabilities)) {
+    if (!knownCapabilities.has(capability)) {
+      throw new TemplateManifestSchemaError(`${field}.${capability} nÃ£o Ã© suportada`);
+    }
+  }
+  if (capabilities.imageAdjustments === undefined) return;
+  if (!isObject(capabilities.imageAdjustments)) {
+    throw new TemplateManifestSchemaError(`${field}.imageAdjustments deve ser um objeto`);
+  }
+  const knownAdjustments = new Set(['zoom', 'position']);
+  for (const [adjustment, enabled] of Object.entries(capabilities.imageAdjustments)) {
+    if (!knownAdjustments.has(adjustment)) {
+      throw new TemplateManifestSchemaError(`${field}.imageAdjustments.${adjustment} nÃ£o Ã© suportado`);
+    }
+    if (typeof enabled !== 'boolean') {
+      throw new TemplateManifestSchemaError(`${field}.imageAdjustments.${adjustment} deve ser booleano`);
+    }
+  }
+}
+
+function normalizeCapabilities(capabilities) {
+  if (!capabilities) return undefined;
+  return {
+    ...(capabilities.imageAdjustments
+      ? { imageAdjustments: { ...capabilities.imageAdjustments } }
+      : {}),
+  };
+}
+
 function validateBrandAssets(brandAssets) {
   if (brandAssets === undefined) return;
   if (!isObject(brandAssets)) {
@@ -91,6 +126,7 @@ function validateManifest(manifest) {
       throw new TemplateManifestSchemaError(`formats.${formatId} deve ser um objeto`);
     }
     validateDimensions(format.dimensions, `formats.${formatId}.dimensions`);
+    validateCapabilities(format.capabilities, `formats.${formatId}.capabilities`);
   }
   validateThemes(manifest.themes);
   validateBrandAssets(manifest.brandAssets);
@@ -105,7 +141,13 @@ function normalizeManifest(manifest) {
   const formats = Object.fromEntries(
     Object.entries(manifest.formats).map(([id, format]) => [
       id,
-      { ...format, dimensions: { ...format.dimensions } },
+      {
+        ...format,
+        dimensions: { ...format.dimensions },
+        ...(format.capabilities
+          ? { capabilities: normalizeCapabilities(format.capabilities) }
+          : {}),
+      },
     ])
   );
   const formatIds = Object.keys(formats);

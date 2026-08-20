@@ -28,6 +28,8 @@ let latestGenerationId = 0;
 let latestBestEffortPreviewUpdateId = 0;
 let editorPreviewReady = true;
 let contentSyncPending = false;
+let currentImageAdjustments = { zoom: 1, x: 50, y: 50 };
+let currentFormat = null;
 const generateDisableReasons = new Set();
 let resolvedImageFieldState = {
   source: null,
@@ -384,7 +386,9 @@ function buildPreviewData(
   backgroundOverride = null,
   formData = readGenerationFormData(),
   extractedDataOverride = null,
-  contentOverride = null
+  contentOverride = null,
+  imageAdjustments = currentImageAdjustments,
+  activeFormat = currentFormat
 ) {
   if (contentOverride) {
     const contentImage = normalizeOptionalValue(contentOverride.image);
@@ -409,14 +413,18 @@ function buildPreviewData(
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
   const extractedData = extractedDataOverride || (hasMatchingNews ? lastNewsData : {});
 
-  return createArtworkData({
+  return {
+    ...createArtworkData({
     formData,
     extractedData,
     manifest: manifestData.manifest,
     resolvedLogo: manifestData.resolvedLogo,
     theme: formData.theme,
     backgroundOverride
-  });
+    }),
+    imageAdjustments: { ...imageAdjustments },
+    ...(activeFormat ? { activeFormat } : {})
+  };
 }
 
 function applyArtworkDataToPreview(artworkData) {
@@ -463,7 +471,13 @@ function requestBestEffortPreviewUpdate() {
     .catch(error => handleBestEffortPreviewUpdateError(error, context));
 }
 
-async function updatePreview(backgroundOverride = null, assertCurrent = null, contentOverride = null) {
+async function updatePreview(
+  backgroundOverride = null,
+  assertCurrent = null,
+  contentOverride = null,
+  imageAdjustments = currentImageAdjustments,
+  activeFormat = currentFormat
+) {
   if (!previewFrame || !currentTemplate) {
     return;
   }
@@ -473,7 +487,9 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null, co
     if (!manifestData) return;
     if (assertCurrent) assertCurrent();
 
-    const artworkData = buildPreviewData(manifestData, backgroundOverride, undefined, null, contentOverride);
+    const artworkData = buildPreviewData(
+      manifestData, backgroundOverride, undefined, null, contentOverride, imageAdjustments, activeFormat
+    );
     if (assertCurrent) assertCurrent();
     applyArtworkDataToPreview(artworkData);
   } catch (error) {
@@ -485,11 +501,12 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null, co
 
 // Sincroniza somente o estado técnico necessário ao renderer. A escolha editorial
 // de brand/family/variant/theme já ocorreu na publication antes desta fronteira.
-function selectRendererState(renderer, theme) {
+function selectRendererState(renderer, theme, activeFormat = null) {
   editorSessionVersion += 1;
   currentTemplate = renderer.template;
   currentPage = renderer.page || DEFAULT_PAGE;
   currentTheme = theme || null;
+  currentFormat = activeFormat;
   currentManifestData = null;
   previewInitializedTemplate = null;
   previewInitializedPage = null;
@@ -510,12 +527,16 @@ window.LegacyEditorBridge = {
     return getOrExtractNewsData(url, assertCurrent);
   },
 
-  async applyPublicationContent({ content, importedImage = null, assertCurrent = null }) {
+  async applyPublicationContent({
+    content, imageAdjustments = currentImageAdjustments, importedImage = null, assertCurrent = null
+  }) {
     if (assertCurrent) assertCurrent();
     if (importedImage) {
       setExtractedImageFieldValue(importedImage.value, importedImage.url);
     }
-    await updatePreview(null, assertCurrent, content);
+    await updatePreview(null, assertCurrent, content, imageAdjustments);
+    if (assertCurrent) assertCurrent();
+    currentImageAdjustments = { ...imageAdjustments };
   },
 
   reconcilePublicationContent({ content, changedField }) {
@@ -546,10 +567,18 @@ window.LegacyEditorBridge = {
     setGenerateDisabled('content-sync', pending);
   },
 
-  async selectRenderer({ renderer, theme, assertCurrent }) {
+  async selectRenderer({
+    renderer,
+    activeFormat = null,
+    theme,
+    imageAdjustments = currentImageAdjustments,
+    assertCurrent
+  }) {
     if (assertCurrent) assertCurrent();
-    selectRendererState(renderer, theme);
-    await updatePreview(null, assertCurrent);
+    selectRendererState(renderer, theme, activeFormat);
+    await updatePreview(null, assertCurrent, null, imageAdjustments, activeFormat);
+    if (assertCurrent) assertCurrent();
+    currentImageAdjustments = { ...imageAdjustments };
   },
 
   selectTheme(theme) {

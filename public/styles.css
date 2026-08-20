@@ -35,6 +35,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .field-group input:hover, .field-group select:hover, .field-group textarea:hover { border-color: #8f97a5; }
 .field-group input::placeholder, .field-group textarea::placeholder { color: #9299a6; }
 .field-group select:disabled { cursor: not-allowed; background: var(--subtle); color: var(--muted); }
+.image-adjustments { margin-top: 16px; display: grid; gap: 14px; }
+.image-adjustments[hidden] { display: none; }
+.range-field { display: grid; gap: 7px; }
+.range-field label { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; }
+.range-field output { font-variant-numeric: tabular-nums; }
+.range-field input[type="range"] { width: 100%; }
 .choice-group { min-width: 0; padding: 0; margin: 18px 0 0; border: 0; }
 .variant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .theme-options { display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; }

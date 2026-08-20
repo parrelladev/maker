@@ -14,6 +14,11 @@
     x: 50,
     y: 50
   });
+  const IMAGE_ADJUSTMENT_LIMITS = Object.freeze({
+    zoom: Object.freeze({ min: 1, max: 3 }),
+    x: Object.freeze({ min: 0, max: 100 }),
+    y: Object.freeze({ min: 0, max: 100 })
+  });
 
   function createFormatState() {
     return {
@@ -117,6 +122,13 @@
 
   function setImageAdjustment(publication, format, adjustment, value) {
     requireAllowedKey(IMAGE_ADJUSTMENTS, adjustment, 'image adjustment');
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`Invalid image adjustment value: ${String(value)}`);
+    }
+    const limits = IMAGE_ADJUSTMENT_LIMITS[adjustment];
+    if (value < limits.min || value > limits.max) {
+      throw new Error(`Image adjustment out of bounds: ${adjustment}`);
+    }
 
     return updateFormat(publication, format, currentFormat => ({
       ...currentFormat,
@@ -130,6 +142,12 @@
   function resetImageAdjustments(publication, format, defaults = {}) {
     Object.keys(defaults).forEach(adjustment => {
       requireAllowedKey(IMAGE_ADJUSTMENTS, adjustment, 'image adjustment');
+      const limits = IMAGE_ADJUSTMENT_LIMITS[adjustment];
+      const value = defaults[adjustment];
+      if (typeof value !== 'number' || !Number.isFinite(value)
+        || value < limits.min || value > limits.max) {
+        throw new Error(`Invalid image adjustment value: ${String(value)}`);
+      }
     });
 
     return updateFormat(publication, format, currentFormat => ({
@@ -143,6 +161,7 @@
 
   return {
     DEFAULT_IMAGE_ADJUSTMENTS,
+    IMAGE_ADJUSTMENT_LIMITS,
     applyContentPatch,
     createPublication,
     resetImageAdjustments,
