@@ -69,13 +69,7 @@ class FakeElement {
 
   remove() {}
 
-  closest(selector) {
-    if (selector === '#storyTemplateGrid') {
-      return this.id === 'storyTemplateGrid' ? this : null;
-    }
-    if (selector === '[data-group]') {
-      return this.dataset.group ? this : null;
-    }
+  closest() {
     return null;
   }
 }
@@ -100,9 +94,6 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   jest.useFakeTimers();
 
   const ids = [
-    'templateModal',
-    'closeModal',
-    'cancelBtn',
     'generateBtn',
     'loadingOverlay',
     'toastContainer',
@@ -113,9 +104,6 @@ function createHarness({ autoResolveRuntime = true } = {}) {
     'themeWrapper',
     'customTheme',
     'customTag',
-    'modalTitle',
-    'storyCategoryTabs',
-    'storyTemplateGrid',
     'fetchDataBtn',
     'previewFrame',
     'previewPlaceholder'
@@ -203,13 +191,7 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   function state() {
     return JSON.parse(run(`JSON.stringify({
       currentTemplate,
-      currentTemplateMeta: currentTemplateMeta && {
-        id: currentTemplateMeta.id,
-        name: currentTemplateMeta.name,
-        group: currentTemplateMeta.group
-      },
       currentTheme,
-      activeStoryGroup,
       lastNewsUrl,
       lastNewsData,
       currentManifestData,
@@ -783,7 +765,6 @@ describe('runtime de bindings carregado por public/script.js', () => {
     expect(target.textContent).toBe('Preview reutilizado');
   });
 });
-
 describe('readiness editorial e exportação legada', () => {
   test('content-sync compoe com editor-preview, news-import e export', () => {
     const harness = createHarness();
@@ -812,7 +793,7 @@ describe('readiness editorial e exportação legada', () => {
 
   test('bridge real usa publication content e nao inputs divergentes no payload', async () => {
     const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.customTitle.value = 'Titulo DOM antigo';
     harness.elements.customSubtitle.value = 'Sub DOM antigo';
     harness.elements.customTag.value = 'Tag DOM antiga';
@@ -832,7 +813,7 @@ describe('readiness editorial e exportação legada', () => {
 
   test('URL nova invalida provenance extraida e remove a imagem antiga do payload', async () => {
     const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     await harness.run(`window.LegacyEditorBridge.applyPublicationContent({
       content: { url: 'https://example.com/a', title: 'A', subtitle: '', tag: '', image: 'data:image/jpeg;base64,QQ==' },
@@ -850,7 +831,7 @@ describe('readiness editorial e exportação legada', () => {
 
   test('titulo manual posterior chega ao payload real e nao restaura importado', async () => {
     const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     await harness.run(`window.LegacyEditorBridge.applyPublicationContent({ content: {
       url: 'https://example.com/a', title: 'Titulo importado', subtitle: '', tag: '', image: ''
@@ -949,7 +930,7 @@ describe('contrato de estado de public/script.js', () => {
 
   test('lê um snapshot normalizado dos dados atuais do formulário de geração', () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = '  https://example.com/noticia  ';
     harness.elements.customTitle.value = '  Título manual  ';
     harness.elements.customSubtitle.value = '  Subtítulo manual  ';
@@ -970,85 +951,9 @@ describe('contrato de estado de public/script.js', () => {
     });
   });
 
-  test('abre o modal com template, metadados, tema padrão e preview reiniciado', () => {
-    const harness = createHarness();
-
-    harness.run(`openModal('agazeta-foto-abaixo')`);
-
-    expect(harness.state()).toEqual({
-      currentTemplate: 'agazeta-foto-abaixo',
-      currentTemplateMeta: {
-        id: 'agazeta-foto-abaixo',
-        name: 'A Gazeta - Foto abaixo',
-        group: 'Principais'
-      },
-      currentTheme: 'azul',
-      activeStoryGroup: 'Principais',
-      lastNewsUrl: null,
-      lastNewsData: null,
-      currentManifestData: null,
-      previewInitializedTemplate: null
-    });
-    expect(harness.elements.templateModal.classList.contains('show')).toBe(true);
-    expect(harness.elements.themeWrapper.style.display).toBe('');
-    expect(harness.elements.newsUrl.focus).toHaveBeenCalled();
-    expect(harness.frameDocument.write).toHaveBeenLastCalledWith(
-      '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>'
-    );
-  });
-
-  test('fecha o modal e invalida seleção, tema, notícia e preview', () => {
-    const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
-    harness.run(`lastNewsUrl = 'https://example.com/a'; lastNewsData = { h1: 'A' };
-      currentManifestData = { manifest: { name: 'HZ' } };
-      previewInitializedTemplate = currentTemplate;`);
-
-    harness.run('closeModalHandler()');
-
-    expect(harness.state()).toEqual({
-      currentTemplate: null,
-      currentTemplateMeta: null,
-      currentTheme: null,
-      activeStoryGroup: 'Principais',
-      lastNewsUrl: null,
-      lastNewsData: null,
-      currentManifestData: null,
-      previewInitializedTemplate: null
-    });
-    expect(harness.elements.templateModal.classList.contains('show')).toBe(false);
-    expect(harness.elements.customTheme.innerHTML).toBe('');
-    expect(harness.elements.themeWrapper.style.display).toBe('none');
-  });
-
-  test('troca de template substitui seleção e limpa notícia e preview anteriores', () => {
-    const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo');
-      lastNewsUrl = 'https://example.com/a';
-      lastNewsData = { h1: 'A' };
-      currentManifestData = { manifest: { name: 'A' } };
-      previewInitializedTemplate = currentTemplate;
-      openModal('rede-gazeta');`);
-
-    expect(harness.state()).toEqual({
-      currentTemplate: 'rede-gazeta',
-      currentTemplateMeta: {
-        id: 'rede-gazeta',
-        name: 'Rede Gazeta',
-        group: 'Especiais'
-      },
-      currentTheme: null,
-      activeStoryGroup: 'Principais',
-      lastNewsUrl: null,
-      lastNewsData: null,
-      currentManifestData: null,
-      previewInitializedTemplate: null
-    });
-  });
-
   test('troca de tema preserva template, notícia, manifest e template do preview', () => {
     const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo');
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul');
       lastNewsUrl = 'https://example.com/a';
       lastNewsData = { h1: 'A' };
       currentManifestData = { manifest: { name: 'A' } };
@@ -1065,26 +970,7 @@ describe('contrato de estado de public/script.js', () => {
       currentManifestData: { manifest: { name: 'A' } },
       previewInitializedTemplate: 'agazeta-foto-abaixo'
     });
-    expect(harness.elements.modalTitle.textContent).toContain('(Preto)');
-  });
-
-  test('troca de grupo altera somente o filtro ativo do catálogo', () => {
-    const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
-    const tab = new FakeElement();
-    tab.dataset.group = 'Especiais';
-
-    harness.elements.storyCategoryTabs.dispatch('click', { target: tab });
-
-    expect(harness.state()).toMatchObject({
-      currentTemplate: 'agazeta-foto-abaixo',
-      currentTheme: 'azul',
-      activeStoryGroup: 'Especiais',
-      lastNewsUrl: null,
-      lastNewsData: null,
-      currentManifestData: null,
-      previewInitializedTemplate: null
-    });
+    expect(harness.elements.customTheme.value).toBe('preto');
   });
 
   test('inicializa manifest e iframe uma vez e os reaproveita para o mesmo template', async () => {
@@ -1097,7 +983,7 @@ describe('contrato de estado de public/script.js', () => {
       html: '<main></main>'
     };
     harness.loadManifest.mockResolvedValue(manifestData);
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.frameDocument.write.mockClear();
 
     const first = await harness.run('ensurePreviewInitialized()');
@@ -1111,29 +997,6 @@ describe('contrato de estado de public/script.js', () => {
       currentManifestData: manifestData,
       previewInitializedTemplate: 'agazeta-foto-abaixo'
     });
-  });
-
-  test('abertura limpa todos os campos editáveis', () => {
-    const harness = createHarness();
-    [
-      'newsUrl',
-      'customTitle',
-      'customSubtitle',
-      'customImageUrl',
-      'customTag'
-    ].forEach(id => {
-      harness.elements[id].value = `valor-${id}`;
-    });
-
-    harness.run(`openModal('fonte-hub')`);
-
-    expect([
-      harness.elements.newsUrl.value,
-      harness.elements.customTitle.value,
-      harness.elements.customSubtitle.value,
-      harness.elements.customImageUrl.value,
-      harness.elements.customTag.value
-    ]).toEqual(['', '', '', '', '']);
   });
 
   test('reaproveita notícia para a mesma URL e substitui o cache para URL diferente', async () => {
@@ -1236,31 +1099,6 @@ describe('contrato de estado de public/script.js', () => {
     }
   );
 
-  test('reabrir após fechar começa uma sessão limpa com o novo template', () => {
-    const harness = createHarness();
-    harness.run(`openModal('layout-hz');
-      lastNewsUrl = 'https://example.com/a';
-      lastNewsData = { h1: 'A' };`);
-    harness.elements.customTitle.value = 'Título anterior';
-
-    harness.run(`closeModalHandler(); openModal('agazeta-foto-acima')`);
-
-    expect(harness.state()).toMatchObject({
-      currentTemplate: 'agazeta-foto-acima',
-      currentTemplateMeta: {
-        id: 'agazeta-foto-acima',
-        name: 'A Gazeta - Foto acima',
-        group: 'Principais'
-      },
-      currentTheme: 'azul',
-      lastNewsUrl: null,
-      lastNewsData: null,
-      currentManifestData: null,
-      previewInitializedTemplate: null
-    });
-    expect(harness.elements.customTitle.value).toBe('');
-    expect(harness.elements.templateModal.classList.contains('show')).toBe(true);
-  });
 });
 
 describe('descarte de buscas de notícia obsoletas', () => {
@@ -1282,7 +1120,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness();
     const extractionA = createDeferred();
     const extractionB = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockReturnValueOnce(extractionA.promise)
@@ -1306,7 +1144,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('preserva o comportamento nominal quando A resolve antes de iniciar B', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockResolvedValueOnce(newsData('A'))
@@ -1328,7 +1166,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness();
     const extractionA = createDeferred();
     const extractionB = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockReturnValueOnce(extractionA.promise)
@@ -1352,7 +1190,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness();
     const extractionA = createDeferred();
     const extractionB = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.extractNewsData
       .mockReturnValueOnce(extractionA.promise)
       .mockReturnValueOnce(extractionB.promise);
@@ -1368,16 +1206,16 @@ describe('descarte de buscas de notícia obsoletas', () => {
     expect(harness.elements.fetchDataBtn.disabled).toBe(false);
   });
 
-  test('ignora A depois que o modal é fechado e reaberto', async () => {
+  test('ignora A depois que a sessão do renderer é substituída', async () => {
     const harness = createHarness();
     const extractionA = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     const updatePreview = jest.fn();
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
     harness.extractNewsData.mockReturnValue(extractionA.promise);
 
     const fetchA = startFetch(harness, 'https://example.com/a');
-    harness.run(`closeModalHandler(); openModal('rede-gazeta')`);
+    harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
     harness.elements.customTitle.value = 'Nova sessão';
     extractionA.resolve(newsData('A'));
     await fetchA;
@@ -1391,7 +1229,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
   test('ignora A quando a URL é editada durante a requisição', async () => {
     const harness = createHarness();
     const extractionA = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.extractNewsData.mockReturnValue(extractionA.promise);
 
     const fetchA = startFetch(harness, 'https://example.com/a');
@@ -1408,7 +1246,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness();
     const extractionA = createDeferred();
     const extractionB = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockReturnValueOnce(extractionA.promise)
@@ -1436,7 +1274,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const extractionA = createDeferred();
     const extractionB = createDeferred();
     const updatePreview = jest.fn();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
     harness.extractNewsData
       .mockReturnValueOnce(extractionA.promise)
@@ -1455,7 +1293,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('não anuncia sucesso quando a aplicação ao preview da busca atual falha', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
       throw new Error('binding inválido');
     });
@@ -1473,7 +1311,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('ignora falha de preview quando a busca se torna obsoleta durante a aplicação', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.extractNewsData.mockResolvedValue(newsData('A'));
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
       harness.elements.newsUrl.value = 'https://example.com/b';
@@ -1488,7 +1326,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('trata explicitamente falha de atualização auxiliar do preview', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     await harness.run('updatePreview()');
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
@@ -1509,7 +1347,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('preserva atualização auxiliar válida da sessão atual', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     await harness.run('updatePreview()');
     const updatePreview = jest.fn();
@@ -1530,7 +1368,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
   test('ignora falha auxiliar de preview pertencente a uma sessão antiga', async () => {
     const harness = createHarness({ autoResolveRuntime: false });
     const documentWritten = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.frameDocument.write.mockImplementation(html => {
       if (html.includes('preview-runtime.js')) documentWritten.resolve();
     });
@@ -1540,7 +1378,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const rejectOldRuntime = harness.elements.previewFrame.contentWindow
       .__rejectPreviewRuntimeReady;
 
-    harness.run(`closeModalHandler(); openModal('rede-gazeta')`);
+    harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
     rejectOldRuntime(new Error('runtime da sessão antiga'));
     for (let index = 0; index < 5; index += 1) {
       await Promise.resolve();
@@ -1554,7 +1392,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness({ autoResolveRuntime: false });
     const firstDocumentWritten = createDeferred();
     const secondDocumentWritten = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.frameDocument.write
       .mockImplementationOnce(() => firstDocumentWritten.resolve())
       .mockImplementationOnce(() => secondDocumentWritten.resolve());
@@ -1598,7 +1436,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness({ autoResolveRuntime: false });
     const firstDocumentWritten = createDeferred();
     const secondDocumentWritten = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.frameDocument.write
       .mockImplementationOnce(() => firstDocumentWritten.resolve())
       .mockImplementationOnce(() => secondDocumentWritten.resolve());
@@ -1637,7 +1475,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const updateA = createDeferred();
     const updateB = createDeferred();
     const updateC = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.context.controlledUpdatePreview = jest.fn()
       .mockReturnValueOnce(updateA.promise)
       .mockReturnValueOnce(updateB.promise)
@@ -1664,7 +1502,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('permite retry depois que a busca atual falha', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockRejectedValueOnce(new Error('falha atual'))
@@ -1683,7 +1521,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
 
   test('permite retry na mesma URL quando o cliente traduz a falha para objeto vazio', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockResolvedValueOnce({})
@@ -1714,7 +1552,7 @@ describe('descarte de buscas de notícia obsoletas', () => {
     const harness = createHarness();
     const extractionA = createDeferred();
     const extractionB = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockReturnValueOnce(extractionA.promise)
@@ -1913,7 +1751,7 @@ describe('validacoes atuais da geracao', () => {
     url = 'https://example.com/a'
   } = {}) {
     const extraction = createDeferred();
-    harness.run(`openModal(${JSON.stringify(template)})`);
+    harness.run(`selectRendererState({ template: ${JSON.stringify(template)}, page: 'index', themes: [] }, null)`);
     harness.elements.newsUrl.value = url;
     harness.extractNewsData.mockReturnValue(extraction.promise);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
@@ -1940,14 +1778,14 @@ describe('validacoes atuais da geracao', () => {
     },
     {
       name: 'URL da noticia ausente',
-      prepare: harness => harness.run(`openModal('layout-hz')`),
+      prepare: harness => harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`),
       message: 'Por favor, insira o link da not\u00edcia',
       focusField: 'newsUrl'
     },
     {
       name: 'URL da noticia invalida',
       prepare: harness => {
-        harness.run(`openModal('layout-hz')`);
+        harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
         harness.elements.newsUrl.value = 'noticia invalida';
       },
       message: 'Por favor, insira um link v\u00e1lido',
@@ -1956,7 +1794,7 @@ describe('validacoes atuais da geracao', () => {
     {
       name: 'imagem manual invalida',
       prepare: harness => {
-        harness.run(`openModal('layout-hz')`);
+        harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
         harness.elements.newsUrl.value = 'https://example.com/noticia';
         harness.elements.customImageUrl.value = 'imagem invalida';
       },
@@ -2004,7 +1842,7 @@ describe('validacoes atuais da geracao', () => {
     focusField
   }) => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue(extractedData);
 
@@ -2024,7 +1862,7 @@ describe('validacoes atuais da geracao', () => {
     const harness = createHarness();
     const updatePreview = jest.fn();
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.elements.customTag.value = 'Categoria manual';
     harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
@@ -2073,7 +1911,7 @@ describe('validacoes atuais da geracao', () => {
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
     harness.loadManifest.mockResolvedValue(manifestData);
     harness.context.Api.embedImage.mockResolvedValue(embeddedImage);
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.elements.customTitle.value = 'Titulo manual';
     harness.elements.customImageUrl.value = 'https://example.com/manual.jpg';
@@ -2110,7 +1948,7 @@ describe('validacoes atuais da geracao', () => {
     const updatePreview = jest.fn();
     const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2142,7 +1980,7 @@ describe('validacoes atuais da geracao', () => {
     const updatePreview = jest.fn();
     const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2164,7 +2002,7 @@ describe('validacoes atuais da geracao', () => {
     const harness = createHarness();
     const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2182,7 +2020,7 @@ describe('validacoes atuais da geracao', () => {
 
   test('editar data URL extraida invalida sua origem automatica e bloqueia a geracao', async () => {
     const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2205,7 +2043,7 @@ describe('validacoes atuais da geracao', () => {
     const embeddedManualImage = 'data:image/jpeg;base64,/9j/TUFOVUFM';
     const updatePreview = jest.fn();
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2229,10 +2067,10 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });
 
-  test('fechar e abrir outro template elimina a origem automatica anterior', async () => {
+  test('trocar a publication elimina a origem automatica anterior', async () => {
     const harness = createHarness();
     const embeddedImage = 'data:image/jpeg;base64,/9j/AA==';
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2240,7 +2078,7 @@ describe('validacoes atuais da geracao', () => {
     });
 
     await harness.run('handleFetchNewsAndPreview()');
-    harness.run(`closeModalHandler(); openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/outra-noticia';
     harness.elements.customImageUrl.value = embeddedImage;
     await harness.run('generateArtWithPreviewFlow()');
@@ -2252,7 +2090,7 @@ describe('validacoes atuais da geracao', () => {
 
   test('alterar a URL da noticia limpa a imagem automatica associada ao cache anterior', async () => {
     const harness = createHarness();
-    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-abaixo', page: 'index', themes: [] }, 'azul')`);
     harness.elements.newsUrl.value = 'https://www.agazeta.com.br/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Cotidiano',
@@ -2273,7 +2111,7 @@ describe('validacoes atuais da geracao', () => {
 
   test('rejeita data URL JPEG digitada diretamente como imagem manual', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.elements.customImageUrl.value = 'data:image/jpeg;base64,/9j/AA==';
 
@@ -2322,7 +2160,7 @@ describe('validacoes atuais da geracao', () => {
     const { extraction, generation } = preparePendingGeneration(harness);
     await Promise.resolve();
 
-    harness.run(`openModal('rede-gazeta')`);
+    harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
     extraction.resolve({
       chapeu: 'Categoria antiga',
       bg: 'data:image/png;base64,QQ=='
@@ -2349,7 +2187,7 @@ describe('validacoes atuais da geracao', () => {
     const { extraction, generation } = preparePendingGeneration(harness);
     await Promise.resolve();
 
-    harness.run(`closeModalHandler(); openModal('agazeta-foto-acima')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-acima', page: 'index', themes: [] }, 'azul')`);
     extraction.resolve({
       chapeu: 'Categoria da sessao anterior',
       bg: 'data:image/png;base64,QQ=='
@@ -2371,11 +2209,11 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });
 
-  test('ignora rejeicao da extracao depois de fechar e reabrir o modal', async () => {
+  test('ignora rejeicao da extracao depois de substituir a sessao do renderer', async () => {
     const harness = createHarness();
     const extraction = createDeferred();
     const extractionStarted = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/a';
     harness.extractNewsData.mockImplementation(() => {
       extractionStarted.resolve();
@@ -2385,7 +2223,7 @@ describe('validacoes atuais da geracao', () => {
 
     const generation = harness.run('generateArtWithPreviewFlow()');
     await extractionStarted.promise;
-    harness.run(`closeModalHandler(); openModal('agazeta-foto-acima')`);
+    harness.run(`selectRendererState({ template: 'agazeta-foto-acima', page: 'index', themes: [] }, 'azul')`);
     extraction.reject(new Error('falha da sessao anterior'));
     await generation;
 
@@ -2408,7 +2246,7 @@ describe('validacoes atuais da geracao', () => {
     const embedStartedA = createDeferred();
     const extractionB = createDeferred();
     const extractionStartedB = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData
       .mockResolvedValueOnce({
@@ -2454,11 +2292,11 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });
 
-  test('ignora rejeicao do download depois de trocar a sessao do modal', async () => {
+  test('ignora rejeicao do download depois de trocar a sessao do renderer', async () => {
     const harness = createHarness();
     const download = createDeferred();
     const downloadStarted = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/a';
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData.mockResolvedValue({
@@ -2472,18 +2310,13 @@ describe('validacoes atuais da geracao', () => {
 
     const generation = harness.run('generateArtWithPreviewFlow()');
     await downloadStarted.promise;
-    harness.run(`closeModalHandler(); openModal('rede-gazeta')`);
+    harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
     download.reject(new Error('falha do download anterior'));
     await generation;
 
     expect(harness.elements.toastContainer.children).toHaveLength(0);
-    expect(harness.elements.customTitle.value).toBe('');
-    expect(harness.elements.customTag.value).toBe('');
-    expect(harness.elements.customImageUrl.value).toBe('');
     expect(harness.state()).toMatchObject({
-      currentTemplate: 'rede-gazeta',
-      lastNewsUrl: null,
-      lastNewsData: null
+      currentTemplate: 'rede-gazeta'
     });
     expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
     expect(harness.elements.generateBtn.disabled).toBe(false);
@@ -2492,7 +2325,7 @@ describe('validacoes atuais da geracao', () => {
   test('usa snapshot consistente e deixa edicoes posteriores para a proxima geracao', async () => {
     const harness = createHarness();
     const extraction = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/a';
     harness.elements.customTitle.value = 'Titulo inicial';
     harness.extractNewsData.mockReturnValue(extraction.promise);
@@ -2527,7 +2360,7 @@ describe('validacoes atuais da geracao', () => {
     const extractionStartedA = createDeferred();
     const extractionStartedB = createDeferred();
     const updatePreview = jest.fn();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
     harness.extractNewsData
       .mockImplementationOnce(() => {
@@ -2583,7 +2416,7 @@ describe('validacoes atuais da geracao', () => {
     const readiness = createDeferred();
     const readinessStarted = createDeferred();
     const events = [];
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Categoria',
@@ -2620,7 +2453,7 @@ describe('validacoes atuais da geracao', () => {
 
   test('bloqueia exportação quando a aplicação do payload final falha', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Categoria',
@@ -2642,7 +2475,7 @@ describe('validacoes atuais da geracao', () => {
 
   test('bloqueia exportação quando o runtime não expõe a atualização final', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Categoria',
@@ -2661,7 +2494,7 @@ describe('validacoes atuais da geracao', () => {
 
   test('restaura a interface quando uma imagem do preview falha ao carregar', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     harness.extractNewsData.mockResolvedValue({
@@ -2684,14 +2517,14 @@ describe('validacoes atuais da geracao', () => {
 
   test('ignora falha de update pertencente a uma geração obsoleta', async () => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Categoria',
       bg: 'data:image/png;base64,QQ=='
     });
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
-      harness.run(`openModal('rede-gazeta')`);
+      harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
       throw new Error('binding da geração antiga');
     });
 
@@ -2713,7 +2546,7 @@ describe('validacoes atuais da geracao', () => {
     async () => {
       const harness = createHarness({ autoResolveRuntime: false });
       const documentWritten = createDeferred();
-      harness.run(`openModal('layout-hz')`);
+      harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
       harness.elements.newsUrl.value = 'https://example.com/noticia';
       harness.extractNewsData.mockResolvedValue({
         chapeu: 'Categoria',
@@ -2746,7 +2579,7 @@ describe('validacoes atuais da geracao', () => {
   test('refaz a inicialização e exporta depois de uma falha do runtime', async () => {
     const harness = createHarness({ autoResolveRuntime: false });
     const firstDocument = createDeferred();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Categoria',
@@ -2788,7 +2621,7 @@ describe('validacoes atuais da geracao', () => {
     async readinessOutcome => {
       const harness = createHarness({ autoResolveRuntime: false });
       const documentWritten = createDeferred();
-      harness.run(`openModal('layout-hz')`);
+      harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
       harness.elements.newsUrl.value = 'https://example.com/noticia';
       harness.extractNewsData.mockResolvedValue({
         chapeu: 'Categoria',
@@ -2807,7 +2640,7 @@ describe('validacoes atuais da geracao', () => {
           new Error('Falha ao inicializar o runtime do preview')
         );
 
-      harness.run(`openModal('rede-gazeta')`);
+      harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
       settleOldRuntime();
       await generation;
 
@@ -2874,7 +2707,7 @@ describe('validacoes atuais da geracao', () => {
     expectDownload = false
   }) => {
     const harness = createHarness();
-    harness.run(`openModal('layout-hz')`);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
     prepare(harness);

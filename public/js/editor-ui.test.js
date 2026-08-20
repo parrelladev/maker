@@ -111,6 +111,14 @@ describe('controller/UI editorial', () => {
     });
     expect(harness.controller.getPreviewState()).toBe('ready');
     expect(harness.elements.downloadCurrent.disabled).toBe(false);
+    expect(harness.api.getEditorCatalog).toHaveBeenCalledTimes(1);
+    expect(harness.api.resolveEditorRenderer).toHaveBeenCalledWith({
+      brand: 'brand-x', family: 'family-y', variant: 'variant-z', format: 'story',
+    });
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenCalledWith(expect.objectContaining({
+      renderer: expect.objectContaining({ template: 'renderer-z', page: 'index' }),
+      theme: 'green',
+    }));
   });
 
   test('trocas de brand e family recalculam toda a configuração válida', async () => {
@@ -264,6 +272,10 @@ describe('controller/UI editorial', () => {
     await harness.controller.selectVariant('variant-q');
     await harness.elements.newArtwork.dispatch('click');
     expect(harness.controller.getPublication()).toMatchObject({ content: { title: '' }, formats: { story: { variant: 'variant-z', theme: 'green' } } });
+    expect(harness.api.getEditorCatalog).toHaveBeenCalledTimes(1);
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      renderer: expect.objectContaining({ template: 'renderer-z' }),
+    }));
   });
 
   test('Nova arte mantém download bloqueado até o renderer default concluir', async () => {

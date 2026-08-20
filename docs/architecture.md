@@ -9,12 +9,13 @@ pelo renderer e pela exportação; não existe um mock visual intermediário. O
 viewport ao redor do iframe é dimensionável e prepara a interface para outras
 proporções, embora Story permaneça o único modo funcional nesta etapa.
 
-O modal deixou de ser a arquitetura principal. IDs ainda consumidos por
-`public/script.js` foram preservados no shell para uma transição incremental,
-assim como containers legados de catálogo isolados e não visíveis. Os controles
-de marca, família, variante e tema são preenchidos declarativamente pelo
-catálogo editorial público. Story é o primeiro formato operacional integrado;
-Feed, Comparar e Baixar ambos permanecem visíveis, mas não estão implementados.
+O novo editor é o único fluxo UX ativo. O bootstrap carrega o catálogo editorial,
+cria a `publication`, resolve o renderer e entrega o preview à ponte técnica. O
+catálogo visual antigo, os cards, `#templateModal`, `#modalTitle` e `#closeModal`
+não fazem parte do DOM nem da inicialização. **Nova arte** reinicia diretamente a
+`publication`; não existe retorno a catálogo ou abertura de modal. Story é o
+primeiro formato operacional integrado; Feed, Comparar e Baixar ambos permanecem
+visíveis, mas não estão implementados.
 
 Este documento descreve a arquitetura observada no código atual. Ele registra o
 comportamento existente; não define uma arquitetura-alvo.
@@ -384,9 +385,8 @@ de imagem em HTTP e contém a função privada `embedImage`.
 
 ### Frontend
 
-`public/index.html` define a grade, o modal, campos manuais, controles, o
-`iframe`, loading e toasts. Ele carrega `api.js`, `preview-export.js`,
-`frontend-utils.js` e `script.js`, nessa ordem.
+`public/index.html` define o shell, campos editoriais, controles, o `iframe`,
+loading e toasts. Não contém catálogo ou modal legado oculto.
 
 `public/js/api.js` expõe `window.Api`:
 
@@ -401,9 +401,10 @@ valores opcionais, escolha do ícone dos toasts, construção do nome do PNG e
 montagem pura do payload da arte. As funções não acessam o DOM e também são
 exportadas para testes unitários.
 
-`public/script.js` mantém o catálogo visível, o estado global da tela e a
-orquestração dos fluxos. Ele monta o documento do `iframe`, carrega o módulo
-estático de runtime e inicializa esse módulo com o manifest da página.
+`public/script.js` mantém a infraestrutura técnica reutilizada: cache de notícia,
+provenance de imagem, estado do renderer, montagem do `iframe`, runtime de
+bindings e exportação. Ele não seleciona brand/family/variant/theme e não
+registra listeners de cards ou modal.
 
 `public/js/preview-runtime.js` expõe `window.PreviewRuntime` dentro do iframe.
 Sua API permite inicializar o manifest, atualizar bindings, aplicar escala e
@@ -430,7 +431,7 @@ a mesma nas duas fases e na montagem do preview.
 
 Depois da primeira validação, a geração captura um contexto imutável com o
 snapshot completo do formulário, URL, template, página, versão da sessão do
-modal e identificador monotônico da geração. Manifest e logo são associados a
+renderer e identificador monotônico da geração. Manifest e logo são associados a
 esse contexto quando o carregamento termina. Dados extraídos complementam o
 snapshot, mas os campos não são relidos para montar a arte: alterações feitas
 durante a operação pertencem à próxima geração.
@@ -457,9 +458,8 @@ registra a origem `extracted` junto com o valor exato em
 `resolvedImageFieldState`. O snapshot da geração só expõe esse conteúdo como
 `resolvedImage` enquanto origem e valor ainda correspondem ao campo; caso
 contrário, ele é `manualImage`. Um evento `input` invalida imediatamente a
-origem automática. Troca de URL, abertura de outro template e fechamento do
-modal também limpam esse estado, impedindo que uma associação antiga seja
-reutilizada.
+origem automática. Troca da URL editorial ou edição manual da imagem também
+limpa esse estado, impedindo que uma associação antiga seja reutilizada.
 
 `public/js/preview-export.js` expõe `window.PreviewExport`. O módulo espera
 fontes e imagens, rejeita imagens que terminam o carregamento sem dimensões,
@@ -470,7 +470,7 @@ ela não equivale ao evento real de erro de carregamento.
 
 ## Listagem e carregamento de templates
 
-Há dois mecanismos distintos de listagem:
+Há duas APIs com responsabilidades distintas:
 
 1. `GET /api/templates` lista o conteúdo válido encontrado no filesystem por
    meio de `listTemplates`. A resposta expõe nome, logo e dimensões somente de
@@ -480,14 +480,12 @@ Há dois mecanismos distintos de listagem:
    as demais páginas sejam retornadas. Testes e ferramentas internas podem
    consultar `{ templates, diagnostics }` por `inspectTemplateCatalog`; os
    diagnósticos não fazem parte da API pública.
-2. A interface atual não consome esse endpoint. Os cards são construídos a
-   partir do array estático `storyTemplates` em `public/script.js`, que também
-   define grupos, nomes, miniaturas, temas e estado “Em construção”.
-
-Ao clicar em um card, `openModal` define `currentTemplate`, configura o tema,
-limpa os campos e caches de tela, esvazia o `iframe` e abre o modal. O template
-propriamente dito só é carregado quando `ensurePreviewInitialized` ou o fluxo de
-geração chama:
+2. `GET /api/editor/catalog` alimenta exclusivamente o novo editor com a
+   hierarquia declarativa de brand/family/variant/format/theme. A seleção é
+   resolvida por `POST /api/editor/resolve`; não há array `storyTemplates`, card
+   ou modal intermediário. A `LegacyEditorBridge.selectRenderer()` recebe o
+   resultado técnico `{ template, page }` e então `ensurePreviewInitialized` ou
+   o fluxo de geração chama:
 
 ```text
 Api.loadManifest(template, "index")
@@ -564,10 +562,10 @@ ou `bg` atualizam esse cache. `null`, `undefined` e objetos sem esses dados
 continuam chegando ao tratamento de erro do chamador, mas não substituem um
 cache válido nem impedem uma nova tentativa para a mesma URL.
 
-A busca explícita captura URL, template, página e versão da sessão do modal,
+A busca explícita captura URL, template, página e versão da sessão do renderer,
 além de um identificador monotônico próprio. O mesmo verificador de contexto é
 passado a `getOrExtractNewsData` e ao carregamento do preview. Se a URL ou o
-template mudar, o modal for fechado ou reaberto, ou outra busca começar, a
+template mudar, a sessão do renderer for substituída, ou outra busca começar, a
 operação anterior termina silenciosamente: não grava o cache, não preenche
 campos, não altera a proveniência da imagem, não atualiza o iframe nem exibe
 toast. Somente a busca ainda atual pode restaurar o botão; a edição da URL e a
@@ -780,73 +778,40 @@ associada ao valor exato e à URL da notícia. Uma edição do campo invalida es
 associação e faz o novo conteúdo seguir o contrato manual. Uma nova extração
 não sobrescreve inputs que já contenham um valor manual.
 
-## Estado global do frontend
+## Estado técnico do renderer no frontend
 
-As variáveis a seguir vivem no escopo global de `public/script.js`:
+A seleção editorial possui um único owner: `publication`, mantida por
+`editor-ui.js`. `currentTemplate`, `currentPage` e `currentTheme` continuam em
+`public/script.js` exclusivamente como projeção técnica do renderer resolvido.
+`selectRendererState()` só é chamado por `LegacyEditorBridge.selectRenderer()`;
+não existe caminho por card, ID hardcoded ou modal.
 
-| Variável | Valor inicial | Escritores | Leitores e responsabilidade |
-| --- | --- | --- | --- |
-| `storyTemplates` | catálogo literal | não é reatribuído | catálogo estático exibido na interface |
-| `templateLookup` | índice por ID | não é reatribuído | resolve os metadados recebidos por `openModal` |
-| `storyGroups` | grupos únicos do catálogo | não é reatribuído | define abas e o primeiro grupo ativo |
-| `DEFAULT_PAGE` | `"index"` | não é reatribuído | página capturada no contexto da geração e usada na inicialização do preview |
-| `currentTemplate` | `null` | `openModal`, `closeModalHandler` | ID do template aberto; bloqueia busca, preview e geração sem seleção |
-| `currentTemplateMeta` | `null` | `openModal`, `closeModalHandler` | metadados estáticos do card aberto, usados no título e nos temas |
-| `currentTheme` | `null` | `openModal`, `closeModalHandler`, evento `change` de `customTheme` | tema selecionado, título do modal e payload do preview |
-| `activeStoryGroup` | primeiro item de `storyGroups`, ou `null` | clique em uma aba de categoria | grupo de cards visível; não é alterado ao abrir ou fechar o modal |
-| `lastNewsUrl` | `null` | `openModal`, `closeModalHandler`, `getOrExtractNewsData` | URL exata à qual o último resultado está associado |
-| `lastNewsData` | `null` | `openModal`, `closeModalHandler`, `getOrExtractNewsData` | último resultado de extração, reutilizado somente quando a URL coincide |
-| `currentManifestData` | `null` | `openModal`, `closeModalHandler`, `ensurePreviewInitialized`, geração | resposta completa da página carregada, incluindo manifest, HTML, CSS e logo |
-| `previewInitializedTemplate` | `null` | `openModal`, `closeModalHandler`, `ensurePreviewInitialized` | ID usado para decidir se o documento atual do iframe pode ser reaproveitado |
-| `previewInitializedPage` | `null` | `openModal`, `closeModalHandler`, `ensurePreviewInitialized` | página usada para decidir se o documento atual do iframe pode ser reaproveitado; é invalidada ao abrir ou fechar o modal |
-| `modalSessionVersion` | `0` | `openModal`, `closeModalHandler` | versão capturada por cada geração; qualquer abertura ou fechamento invalida contextos anteriores |
-| `latestGenerationId` | `0` | `createGenerationContext` | identifica a geração mais recente; iniciar outra geração invalida as anteriores e define quem pode remover o loading |
+`editorSessionVersion` substitui o nome histórico `modalSessionVersion` e mantém
+a mesma proteção stale para geração, busca e inicialização. A troca de renderer
+incrementa essa versão e invalida operações técnicas anteriores sem alterar a
+fonte editorial. `previewInitializationVersion` permanece independente e
+protege inicializações concorrentes do iframe.
 
-O arquivo também conserva referências globais aos elementos do DOM. Em
-`api.js`, `manifestCache` é estado persistente privado da IIFE, indexado por
-template e página e preenchido somente após uma resposta bem-sucedida. No
-backend, `LOGO_CACHE` persiste no processo e é indexado pelo valor da logo
-declarado em manifest local. O cache não inclui o texto alternativo recebido na
-chamada nem resultados nulos ou falhas de resolução.
+A `LegacyEditorBridge` expõe somente operações consumidas pelo controller novo:
+seleção de renderer e tema, importação, reconciliação/aplicação de conteúdo e os
+bloqueios de readiness de preview, importação e sincronização. Cache,
+provenance, bindings e exportação permanecem temporariamente em `script.js`.
+`#customTheme` continua oculto como ponte comprovada para o runtime; nenhum outro
+DOM legado é necessário.
 
-### Transições observadas
+`lastNewsUrl`/`lastNewsData` preservam o cache associado à URL exata.
+`resolvedImageFieldState` preserva provenance manual ou extraída e a associação
+entre URL e data URL/backend-resolved image. `currentManifestData`,
+`previewInitializedTemplate` e `previewInitializedPage` registram exclusivamente
+o documento técnico carregado no iframe. Em `api.js`, `manifestCache` permanece
+privado e indexado por template/página.
 
-- Abrir o modal resolve o template e seus metadados, aplica o tema padrão,
-  limpa o par `lastNewsUrl`/`lastNewsData`, limpa o par
-  `currentManifestData`/`previewInitializedTemplate` e
-  `previewInitializedPage`, esvazia os cinco campos editáveis e reinicializa o
-  documento do iframe.
-- Fechar o modal limpa seleção, tema, notícia e preview, mas preserva
-  `activeStoryGroup`. Os valores dos campos e o documento do iframe não são
-  limpos no fechamento; a próxima abertura executa essa limpeza.
-- Abrir outro template, mesmo sem fechar antes, inicia uma nova sessão com as
-  mesmas invalidações da abertura normal.
-- Trocar tema preserva template, metadados, grupo, notícia e preview
-  inicializado. A troca atualiza o título e solicita uma atualização do mesmo
-  preview.
-- `getOrExtractNewsData` reaproveita `lastNewsData` somente quando
-  `lastNewsUrl === url` e existe um resultado cacheado. Qualquer URL diferente
-  faz nova extração, mas os dois valores só são substituídos quando a resposta
-  contém `h1`, `h2`, `chapeu` ou `bg`. Não há TTL.
-- O fluxo independente “Buscar dados” fornece uma guarda com URL, template,
-  página, sessão e identificador monotônico. Duas buscas concorrentes só podem
-  atualizar o cache pela operação que ainda estiver atual.
-- Dentro de `generateArtWithPreviewFlow`, `getOrExtractNewsData` recebe uma
-  guarda do contexto. Resultados resolvidos só atualizam o cache se URL,
-  template, página, sessão e identificador de geração ainda forem atuais.
-  Rejeições também consultam o mesmo contexto no `catch` antes de produzir log
-  ou toast, portanto falhas de operações obsoletas terminam silenciosamente.
-- `ensurePreviewInitialized` reaproveita `currentManifestData` somente quando
-  ele é truthy e tanto `previewInitializedTemplate` quanto
-  `previewInitializedPage` coincidem com o template e a página solicitados.
-  Caso contrário, carrega ou recebe a página, valida a guarda opcional e então
-  atualiza o estado e escreve o documento no iframe.
+A inicialização ativa é:
 
-Essas regras descrevem o contrato atual, não uma proposta de organização. Os
-testes de caracterização em `public/script.test.js` acessam o mesmo escopo do
-script em um contexto isolado e fixam essas transições sem expor uma nova API
-de produção.
-
+```text
+infraestrutura técnica -> bootstrap do editor -> editorCatalog -> publication
+-> resolveRenderer -> LegacyEditorBridge -> iframe real -> preview/export
+```
 ## Dependências entre frontend e backend
 
 Os contratos principais são:

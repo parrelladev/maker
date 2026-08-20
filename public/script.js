@@ -1,90 +1,3 @@
-const storyTemplates = [
-  // PRINCIPAIS
-  {
-    id: 'agazeta-foto-abaixo',
-    name: 'A Gazeta - Foto abaixo',
-    group: 'Principais',
-    preview: 'previews/stories/Marca-A-Gazeta.png',
-    defaultTheme: 'azul',
-    themes: [
-      { id: 'azul', name: 'Azul', preview: 'previews/stories/horiz-foto-lateral-azul.png' },
-      { id: 'branco', name: 'Branco', preview: 'previews/stories/horiz-conteudo-central-vermelho.png' },
-      { id: 'preto', name: 'Preto', preview: 'previews/stories/horiz-foto-acima-laranja.png' }
-    ]
-  },
-  {
-    id: 'agazeta-foto-acima',
-    name: 'A Gazeta - Foto acima',
-    group: 'Principais',
-    preview: 'previews/stories/Marca-A-Gazeta.png',
-    defaultTheme: 'azul',
-    themes: [
-      { id: 'azul', name: 'Azul', preview: 'previews/stories/vert-foto-acima-azul.png' },
-      { id: 'branco', name: 'Branco', preview: 'previews/stories/vert-conteudo-central-verde.png' },
-      { id: 'preto', name: 'Preto', preview: 'previews/stories/vert-conteudo-inferior-roxo.png' }
-    ]
-  },
-  {
-    id: 'layout-hz',
-    name: 'HZ Entretenimento',
-    group: 'Principais',
-    preview: 'previews/stories/Marca-HZ-Principal-Positivo.png',
-    defaultTheme: 'rosa',
-    themes: [
-      { id: 'rosa', name: 'Rosa', preview: 'previews/stories/horiz-conteudo-diagonal-roxo.png' },
-      { id: 'amarelo', name: 'Amarelo', preview: 'previews/stories/vert-foto-lateral-amarelo.png' }
-    ]
-  },
-
-  // ESPECIAIS
-  {
-    id: 'colunistas',
-    name: 'A Gazeta - Colunistas',
-    group: 'Especiais',
-    status: 'construction',
-    preview: 'previews/stories/Marca-A-Gazeta-Black.png',
-    themes: []
-  },
-  {
-    id: 'opiniao',
-    name: 'A Gazeta - Opinião',
-    group: 'Especiais',
-    status: 'construction',
-    preview: 'previews/stories/Marca-A-Gazeta-Black.png',
-    themes: []
-  },
-  {
-    id: 'layout-bbc',
-    name: 'BBC News',
-    group: 'Especiais',
-    status: 'construction',
-    preview: 'previews/stories/Marca-BBC.png',
-    themes: []
-  },
-  {
-    id: 'fonte-hub',
-    name: 'Fonte Hub',
-    group: 'Especiais',
-    preview: 'previews/stories/Marca-Fonte-Hub.png',
-    themes: []
-  },
-  {
-    id: 'se-cuida',
-    name: 'HZ - Se Cuida',
-    group: 'Especiais',
-    status: 'construction',
-    preview: 'previews/stories/Marca-Se-Cuida.png',
-    themes: []
-  },
-  {
-    id: 'rede-gazeta',
-    name: 'Rede Gazeta',
-    group: 'Especiais',
-    preview: 'previews/stories/Marca-Rede-Gazeta.png',
-    themes: []
-  }
-];
-
 const {
   buildExportFilename,
   createArtworkData,
@@ -95,16 +8,12 @@ const {
   validateGenerationInput
 } = window.FrontendUtils;
 
-const templateLookup = Object.fromEntries(storyTemplates.map(template => [template.id, template]));
-const storyGroups = Array.from(new Set(storyTemplates.map(template => template.group)));
 const DEFAULT_PAGE = 'index';
 const STALE_OPERATION_CODE = 'OPERATION_STALE';
 
 let currentTemplate = null;
 let currentPage = DEFAULT_PAGE;
-let currentTemplateMeta = null;
 let currentTheme = null;
-let activeStoryGroup = storyGroups[0] || null;
 
 // Estado da tela de geração
 let lastNewsData = null;
@@ -113,7 +22,8 @@ let currentManifestData = null;
 let previewInitializedTemplate = null;
 let previewInitializedPage = null;
 let previewInitializationVersion = 0;
-let modalSessionVersion = 0;
+// Estado técnico de sessão do renderer; a seleção editorial pertence à publication.
+let editorSessionVersion = 0;
 let latestGenerationId = 0;
 let latestNewsFetchId = 0;
 let latestBestEffortPreviewUpdateId = 0;
@@ -126,9 +36,6 @@ let resolvedImageFieldState = {
   newsUrl: null
 };
 
-const modal = document.getElementById('templateModal');
-const closeModal = document.getElementById('closeModal');
-const cancelBtn = document.getElementById('cancelBtn');
 const generateBtn = document.getElementById('generateBtn');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const toastContainer = document.getElementById('toastContainer');
@@ -139,9 +46,6 @@ const customImageUrl = document.getElementById('customImageUrl');
 const themeWrapper = document.getElementById('themeWrapper');
 const customTheme = document.getElementById('customTheme');
 const customTag = document.getElementById('customTag');
-const modalTitle = document.getElementById('modalTitle');
-const storyCategoryTabs = document.getElementById('storyCategoryTabs');
-const storyTemplateGrid = document.getElementById('storyTemplateGrid');
 const fetchDataBtn = document.getElementById('fetchDataBtn');
 const previewFrame = document.getElementById('previewFrame');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
@@ -195,7 +99,7 @@ function createGenerationContext(formData) {
   return {
     formData: { ...formData },
     generationId: ++latestGenerationId,
-    modalSessionVersion,
+    editorSessionVersion,
     page: currentPage,
     template: formData.template,
     url: formData.newsUrl
@@ -205,7 +109,7 @@ function createGenerationContext(formData) {
 function createNewsFetchContext(formData) {
   return {
     fetchId: ++latestNewsFetchId,
-    modalSessionVersion,
+    editorSessionVersion,
     page: currentPage,
     template: formData.template,
     url: formData.newsUrl
@@ -215,7 +119,7 @@ function createNewsFetchContext(formData) {
 function isNewsFetchContextCurrent(context) {
   return (
     context.fetchId === latestNewsFetchId
-    && context.modalSessionVersion === modalSessionVersion
+    && context.editorSessionVersion === editorSessionVersion
     && context.template === currentTemplate
     && context.page === currentPage
     && context.url === normalizeOptionalValue(newsUrl.value)
@@ -233,7 +137,7 @@ function assertNewsFetchContextCurrent(context) {
 function isGenerationContextCurrent(context) {
   return (
     context.generationId === latestGenerationId
-    && context.modalSessionVersion === modalSessionVersion
+    && context.editorSessionVersion === editorSessionVersion
     && context.template === currentTemplate
     && context.page === currentPage
     && context.url === normalizeOptionalValue(newsUrl.value)
@@ -278,62 +182,11 @@ document.addEventListener('DOMContentLoaded', () => {
     themeWrapper.style.display = 'none';
   }
 
-  renderCategoryTabs();
-  renderTemplateCards();
   setupEventListeners();
   resizePreviewFrame();
 });
 
 function setupEventListeners() {
-  if (storyCategoryTabs) {
-    storyCategoryTabs.addEventListener('click', (event) => {
-      const tab = event.target.closest('[data-group]');
-      if (!tab) return;
-
-      const { group } = tab.dataset;
-      if (group && group !== activeStoryGroup) {
-        activeStoryGroup = group;
-        renderCategoryTabs();
-        renderTemplateCards();
-      }
-    });
-  }
-
-  if (storyTemplateGrid) {
-    storyTemplateGrid.addEventListener('click', (event) => {
-      const card = event.target.closest('.template-card');
-      if (!card) return;
-
-      const templateId = card.dataset.template;
-      if (templateId) {
-        openModal(templateId);
-      }
-    });
-  }
-
-  document.addEventListener('click', (event) => {
-    const card = event.target.closest('.template-card');
-    if (!card || card.closest('#storyTemplateGrid')) return;
-
-    const templateId = card.dataset.template;
-    if (templateId) {
-      openModal(templateId);
-    }
-  });
-
-  if (closeModal) {
-    closeModal.addEventListener('click', closeModalHandler);
-  }
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', closeModalHandler);
-  }
-
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal) {
-      closeModalHandler();
-    }
-  });
-
   generateBtn.addEventListener('click', generateArtWithPreviewFlow);
 
   newsUrl.addEventListener('input', () => {
@@ -371,187 +224,11 @@ function setupEventListeners() {
   if (customTheme) {
     customTheme.addEventListener('change', (event) => {
       currentTheme = event.target.value || null;
-      updateModalTitle();
       requestBestEffortPreviewUpdate();
     });
   }
 
   window.addEventListener('resize', resizePreviewFrame);
-}
-
-function renderCategoryTabs() {
-  if (!storyCategoryTabs) return;
-
-  storyCategoryTabs.innerHTML = '';
-
-  storyGroups.forEach(group => {
-    const tabButton = document.createElement('button');
-    tabButton.type = 'button';
-    tabButton.className = `category-tab${group === activeStoryGroup ? ' active' : ''}`;
-    tabButton.dataset.group = group;
-    tabButton.textContent = group;
-    storyCategoryTabs.appendChild(tabButton);
-  });
-}
-
-function renderTemplateCards() {
-  if (!storyTemplateGrid) return;
-
-  storyTemplateGrid.innerHTML = '';
-
-  const templatesToRender = activeStoryGroup
-    ? storyTemplates.filter(template => template.group === activeStoryGroup)
-    : storyTemplates;
-
-  templatesToRender.forEach(template => {
-    const card = document.createElement('div');
-    card.className = 'template-card story-card';
-    card.dataset.group = template.group;
-    card.dataset.template = template.id;
-
-    const themeInfo = Array.isArray(template.themes) && template.themes.length
-      ? (template.themes.length === 1
-        ? '<span class="template-meta">Tema unico</span>'
-        : `<span class="template-meta">${template.themes.length} temas</span>`)
-      : '';
-
-    const statusPill = template.status === 'construction'
-      ? '<span class="template-pill template-pill-warning">Em construção</span>'
-      : '';
-
-    card.innerHTML = `
-      <div class="template-preview">
-        <img src="${template.preview}" alt="${template.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-        <div class="template-placeholder" style="display: none;">
-          <i class="fa-solid fa-image"></i>
-        </div>
-      </div>
-      <div class="template-info">
-        <span class="template-pill">${template.group}</span>
-        ${statusPill}
-        <p class="template-label">${template.name}</p>
-        ${themeInfo}
-      </div>
-    `;
-
-    storyTemplateGrid.appendChild(card);
-  });
-
-  if (!storyTemplateGrid.children.length) {
-    const emptyState = document.createElement('div');
-    emptyState.className = 'empty-state';
-    emptyState.textContent = 'Nenhum template disponivel para este agrupamento.';
-    storyTemplateGrid.appendChild(emptyState);
-  }
-}
-
-function updateModalTitle() {
-  if (!modalTitle) return;
-
-  if (!currentTemplateMeta) {
-    modalTitle.textContent = currentTemplate ? `Gerar Arte - ${currentTemplate}` : 'Gerar Arte';
-    return;
-  }
-
-  let title = `Gerar Arte - ${currentTemplateMeta.name}`;
-  if (Array.isArray(currentTemplateMeta.themes) && currentTemplateMeta.themes.length) {
-    const activeTheme = currentTemplateMeta.themes.find(theme => theme.id === currentTheme);
-    if (activeTheme) {
-      title += ` (${activeTheme.name})`;
-    }
-  }
-
-  modalTitle.textContent = title;
-}
-
-function openModal(templateKey) {
-  const templateData = templateLookup[templateKey];
-
-  modalSessionVersion += 1;
-  currentTemplateMeta = templateData || null;
-  currentTemplate = templateData ? templateData.id : templateKey;
-  currentPage = DEFAULT_PAGE;
-  lastNewsData = null;
-  lastNewsUrl = null;
-  currentManifestData = null;
-  previewInitializedTemplate = null;
-  previewInitializedPage = null;
-  previewInitializationVersion += 1;
-  clearResolvedImageFieldState();
-
-  if (templateData && Array.isArray(templateData.themes) && templateData.themes.length) {
-    const defaultTheme = templateData.defaultTheme || templateData.themes[0].id;
-    currentTheme = defaultTheme;
-
-    if (customTheme) {
-      customTheme.innerHTML = templateData.themes
-        .map(theme => `<option value="${theme.id}">${theme.name}</option>`)
-        .join('');
-      customTheme.value = currentTheme;
-    }
-
-    if (themeWrapper) {
-      themeWrapper.style.display = '';
-    }
-  } else {
-    currentTheme = null;
-    if (customTheme) {
-      customTheme.innerHTML = '';
-    }
-    if (themeWrapper) {
-      themeWrapper.style.display = 'none';
-    }
-  }
-
-  updateModalTitle();
-
-  newsUrl.value = '';
-  customTitle.value = '';
-  customSubtitle.value = '';
-  customImageUrl.value = '';
-  customTag.value = '';
-
-  if (previewFrame) {
-    const frameDoc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
-    if (frameDoc) {
-      frameDoc.open();
-      frameDoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>');
-      frameDoc.close();
-    }
-  }
-  if (previewPlaceholder) {
-    previewPlaceholder.style.display = '';
-  }
-
-  modal.classList.add('show');
-  if (fetchDataBtn) {
-    fetchDataBtn.disabled = false;
-  }
-  newsUrl.focus();
-  resizePreviewFrame();
-}
-
-function closeModalHandler() {
-  modalSessionVersion += 1;
-  modal.classList.remove('show');
-  currentTemplate = null;
-  currentPage = DEFAULT_PAGE;
-  currentTemplateMeta = null;
-  currentTheme = null;
-  lastNewsData = null;
-  lastNewsUrl = null;
-  currentManifestData = null;
-  previewInitializedTemplate = null;
-  previewInitializedPage = null;
-  previewInitializationVersion += 1;
-  clearResolvedImageFieldState();
-
-  if (customTheme) {
-    customTheme.innerHTML = '';
-  }
-  if (themeWrapper) {
-    themeWrapper.style.display = 'none';
-  }
 }
 
 async function loadManifest(template, page = 'index') {
@@ -860,7 +537,7 @@ function applyArtworkDataToPreview(artworkData) {
 function isBestEffortPreviewContextCurrent(context) {
   return (
     context.updateId === latestBestEffortPreviewUpdateId
-    && context.modalSessionVersion === modalSessionVersion
+    && context.editorSessionVersion === editorSessionVersion
     && context.template === currentTemplate
     && context.page === currentPage
   );
@@ -883,7 +560,7 @@ function handleBestEffortPreviewUpdateError(error, context) {
 function requestBestEffortPreviewUpdate() {
   const context = {
     updateId: ++latestBestEffortPreviewUpdateId,
-    modalSessionVersion,
+    editorSessionVersion,
     template: currentTemplate,
     page: currentPage
   };
@@ -909,6 +586,26 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null, co
     if (isStaleOperationError(error)) return;
     if (assertCurrent) assertCurrent();
     throw error;
+  }
+}
+
+// Sincroniza somente o estado técnico necessário ao renderer. A escolha editorial
+// de brand/family/variant/theme já ocorreu na publication antes desta fronteira.
+function selectRendererState(renderer, theme) {
+  editorSessionVersion += 1;
+  currentTemplate = renderer.template;
+  currentPage = renderer.page || DEFAULT_PAGE;
+  currentTheme = theme || null;
+  currentManifestData = null;
+  previewInitializedTemplate = null;
+  previewInitializedPage = null;
+  previewInitializationVersion += 1;
+
+  if (customTheme) {
+    customTheme.innerHTML = (renderer.themes || [])
+      .map(item => `<option value="${item.id}">${item.label}</option>`)
+      .join('');
+    customTheme.value = currentTheme || '';
   }
 }
 
@@ -957,34 +654,13 @@ window.LegacyEditorBridge = {
 
   async selectRenderer({ renderer, theme, assertCurrent }) {
     if (assertCurrent) assertCurrent();
-    modalSessionVersion += 1;
-    currentTemplate = renderer.template;
-    currentPage = renderer.page || DEFAULT_PAGE;
-    currentTemplateMeta = {
-      id: renderer.template,
-      name: renderer.template,
-      themes: (renderer.themes || []).map(item => ({ id: item.id, name: item.label }))
-    };
-    currentTheme = theme || null;
-    currentManifestData = null;
-    previewInitializedTemplate = null;
-    previewInitializedPage = null;
-    previewInitializationVersion += 1;
-
-    if (customTheme) {
-      customTheme.innerHTML = (renderer.themes || [])
-        .map(item => `<option value="${item.id}">${item.label}</option>`)
-        .join('');
-      customTheme.value = currentTheme || '';
-    }
-    updateModalTitle();
+    selectRendererState(renderer, theme);
     await updatePreview(null, assertCurrent);
   },
 
   selectTheme(theme) {
     currentTheme = theme || null;
     if (customTheme) customTheme.value = currentTheme || '';
-    updateModalTitle();
     requestBestEffortPreviewUpdate();
   },
 

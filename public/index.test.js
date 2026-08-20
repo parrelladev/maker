@@ -61,6 +61,8 @@ describe('shell do editor', () => {
 
   test('não usa modal como arquitetura principal', () => {
     expect($('.modal, .modal-content, .modal-body')).toHaveLength(0);
+    expect($('#templateModal, #modalTitle, #closeModal')).toHaveLength(0);
+    expect($('#storyTemplateGrid, #storyCategoryTabs, .legacy-template-catalog')).toHaveLength(0);
     expect($('.editor-sidebar').closest('.editor-app')).toHaveLength(1);
     expect($('.editor-workspace').closest('.editor-app')).toHaveLength(1);
   });
