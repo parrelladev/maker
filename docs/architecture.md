@@ -139,7 +139,9 @@ redirecionamento, que é seguido explicitamente pelo cliente. O `lookup`
 Promise-based entrega ao Axios somente endereços previamente validados, sem
 alterar hostname, `Host`, TLS ou SNI. Cada consumidor fornece timeout, limite de
 bytes e quantidade máxima de redirecionamentos; os erros operacionais são
-classificados. O timeout cria uma única deadline monotônica para a operação
+classificados. Cada salto usa Agents HTTP e HTTPS explícitos, sem keep-alive,
+para impedir que o proxy ambiental dos Agents globais contorne o endereço
+fixado. O timeout cria uma única deadline monotônica para a operação
 completa: DNS, conexão, resposta e redirects compartilham o mesmo orçamento, e
 cada chamada Axios recebe somente o tempo restante.
 
@@ -668,11 +670,12 @@ um card estático pode apontar para conteúdo ausente.
 
 No backend:
 
-- leitura síncrona de configuração, manifests, HTML, CSS, logos e diretórios;
+- leitura síncrona da configuração e leitura assíncrona de manifests, HTML,
+  CSS, logos e diretórios;
 - abertura da porta HTTP quando `server.js` é executado como entrypoint;
 - requisições HTTP para notícias, imagens e SVGs remotos;
 - mutação dos caches em memória;
-- logs de configuração, servidor, chapéu e erros; logs de requisição com falha
+- logs de configuração, servidor e erros; logs de requisição com falha
   incluem o erro original e contexto operacional.
 
 No frontend:
@@ -691,21 +694,21 @@ No frontend:
 
 - A composição do Express permanece no mesmo módulo do entrypoint, embora o
   guard de `require.main` permita importar o app sem abrir a porta configurada.
-- As rotas acessam diretamente filesystem e serviços importados, sem
-  pontos explícitos de injeção.
-- `templates.js` combina roteamento, leitura de HTML/CSS, ordenação, resolução
-  de logo e tradução de erros.
+- As rotas usam serviços importados sem pontos explícitos de injeção. A leitura
+  de manifests e a montagem de HTML, CSS e logo ficam, respectivamente, em
+  `manifestLoader` e `templatePageService`, que possuem cobertura direta.
 - `news.js` combina contrato HTTP e download/conversão de imagem; `embedImage`
   não é exportada.
 - O frontend está concentrado em um script global acoplado ao DOM real e a
   objetos `window`.
-- O runtime de bindings existe como uma string interpolada, executada apenas
-  depois de `document.write` no iframe.
+- O runtime de bindings é um módulo estático, mas seu bootstrap e execução
+  continuam dependentes do documento escrito no iframe.
 - Preview e exportação dependem de APIs de navegador, fontes, carregamento de
   imagens, CORS, timing e `html-to-image`.
-- Operações assíncronas de extração e inicialização não carregam um identificador
-  de requisição; respostas atrasadas podem atualizar o estado depois de uma
-  mudança de URL ou template.
+- Operações assíncronas de busca, geração e atualização auxiliar carregam
+  identidade de URL, template, página, sessão e/ou contador monotônico. Elas
+  descartam conclusões obsoletas, mas não cancelam fisicamente o trabalho já
+  iniciado.
 - Os caches do frontend e do backend persistem no escopo do módulo/processo e
   não têm API de limpeza ou invalidação. O cache de logos limita-se a 32
   entradas com descarte FIFO; alterações de manifest ou asset durante a
@@ -713,8 +716,9 @@ No frontend:
   página.
 - Os manifests atuais não exercitam todos os tipos aceitos pelo runtime.
 - A suíte automatizada cobre rotas HTTP, carregamento de templates, requisições
-  externas simuladas e o cliente HTTP seguro, mas não cobre precedência,
-  bindings, loading ou exportação no navegador.
+  externas simuladas, cliente HTTP seguro, precedência, bindings, loading,
+  readiness e exportação em ambientes simulados. Ela não executa esses fluxos
+  em navegador real nem comprova equivalência visual do PNG.
 
 ## Riscos e limitações observados
 
@@ -735,7 +739,8 @@ No frontend:
 - A API de extração converte falhas em `{}` no cliente, perdendo o detalhe da
   resposta antes que o fluxo principal trate o resultado.
 - A listagem do frontend e a listagem do backend podem divergir.
-- A ordem dos CSS depende da ordem do filesystem.
+- CSS compartilhado precede CSS da página e os arquivos de cada diretório são
+  ordenados deterministicamente por nome.
 - O cálculo externo de escala pressupõe largura de design de 1080, enquanto o
   runtime interno e a exportação consultam o manifest.
 - `classes` apenas adiciona classes; atualizações posteriores não removem
@@ -746,5 +751,5 @@ No frontend:
   runtime.
 - A ausência de isolamento por `sandbox` torna o iframe dependente da confiança
   nos templates e scripts que ele carrega.
-- A cobertura automatizada atual não demonstra preservação dos fluxos
-  completos descritos neste documento.
+- A cobertura automatizada não demonstra os fluxos completos em navegador real
+  nem equivalência visual entre preview e PNG.

@@ -589,8 +589,7 @@ O servidor registra:
 - erros de rotas e middleware com método, rota, status, categoria pública,
   contexto da operação e objeto de erro original;
 - falha ao importar `config.js`;
-- endereço e porta de escuta;
-- chapéu extraído.
+- endereço e porta de escuta.
 
 O frontend registra erros de API, preview, bindings e geração no console.
 
@@ -630,8 +629,12 @@ O frontend registra erros de API, preview, bindings e geração no console.
 - **Dependente do ambiente:** templates/manifests/assets locais precisam ser
   comprometidos ou uma logo remota configurada precisa fornecer conteúdo
   ativo.
+- **Defesa existente:** a serialização do manifest escapa `<`, U+2028 e U+2029
+  antes de interpolar o valor no bootstrap; testes cobrem `</script>` e
+  confirmam a reconstrução lógica do conteúdo original.
 - **Hipóteses a testar:** bypass das allowlists SVG em navegador, binding
-  `html`, atributos, toast e fechamento de script no manifest.
+  `html`, atributos e toast. A defesa de serialização não torna confiáveis o
+  HTML, o CSS ou os bindings do manifest local.
 
 ### Consumo excessivo de recursos
 
@@ -666,8 +669,8 @@ simulam os três fluxos externos. Ela não cobre:
 - decodificação completa e integridade estrutural das imagens;
 - política de redaction e correlação dos logs internos;
 - execução de SVG local ou remoto em navegador;
-- bindings e `innerHTML`;
-- construção do iframe;
+- bindings, `innerHTML` e construção do iframe em navegador real; esses fluxos
+  possuem cobertura automatizada em DOM simulado;
 - concorrência e consumo de memória;
 - comportamento de browser na exportação.
 

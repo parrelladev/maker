@@ -105,17 +105,19 @@ Não há configuração de limite mínimo de cobertura, snapshots ou setup globa
 
 ## Testes existentes
 
-Existem treze arquivos:
+Existem quinze arquivos:
 
 ```text
 public/script.test.js
 public/js/frontend-utils.test.js
+public/js/preview-export.test.js
 src/server.test.js
 src/routes/templates.test.js
 src/routes/news.external.test.js
 src/lib/assetResolver.external.test.js
 src/lib/assetResolver.local.test.js
 src/lib/imageValidator.test.js
+src/lib/manifestLoader.test.js
 src/lib/remoteRequestPolicy.test.js
 src/lib/safeHttpClient.test.js
 src/lib/svgSanitizer.test.js
@@ -418,11 +420,11 @@ de cobertura.
 - catálogo e seleção de templates por interação real;
 - seleção e troca de tema em navegador;
 - cliente das APIs;
-- construção do documento do iframe;
-- escala do preview;
+- construção do documento do iframe em navegador real;
+- escala visual do preview em navegador real;
 - confiança em manifest e template;
-- espera de fontes e imagens;
-- bloqueio de imagens não exportáveis;
+- espera real de fontes e imagens pelo navegador;
+- bloqueio de imagens não exportáveis em navegador real;
 - captura real com `html-to-image`;
 - criação e revogação da URL de download.
 
