@@ -1,6 +1,53 @@
 # Arquitetura atual do Maker
 
-## Story e Feed operacionais
+## Story, Feed e Compare operacionais
+
+`viewMode` é estado transitório de UI e pode ser `story`, `feed` ou `compare`.
+`activeFormat` continua separado da `publication`: em modo single ele coincide
+com o painel visível; em Compare identifica o painel selecionado, o alvo dos
+controles da sidebar e o formato exportado por **Baixar atual**. Clicar no
+seletor acessível de Feed ou Story muda esse alvo sem editar os dois formatos.
+
+Compare mantém uma única `publication` e apresenta simultaneamente suas duas
+projeções. O runtime técnico usa `previewContexts.feed` e
+`previewContexts.story`; cada contexto conserva iframe real, renderer, template,
+page, manifest, dimensões, tema, ajustes, readiness e versão de inicialização.
+O layout single apenas oculta um desses mesmos painéis, portanto um Story já
+pronto é reutilizado ao entrar em Compare. No modo individual, o painel ocupa a
+largura disponível do stage para que o cálculo do preview receba a área real;
+em Compare, cada painel continua limitado à metade da largura e a 430 px.
+
+No controller, renderer request, content-sync, renderer resolvido, readiness e
+erro são indexados por formato. Feed e Story resolvem e sincronizam em paralelo
+sem se invalidarem; dentro do mesmo formato, somente a versão mais recente tem
+autoridade. Conteúdo compartilhado sincroniza ambos em Compare, enquanto theme,
+variant e image adjustments sincronizam somente `activeFormat`.
+
+**Baixar atual** exige o contexto de `activeFormat`. **Baixar ambos** valida Feed
+e Story antes de qualquer captura, mantém o lock durante a transação e exporta
+diretamente os DOMs existentes como `maker-feed.png` (1080×1350) e
+`maker-story.png` (1080×1920).
+
+Exportabilidade possui um contrato único por formato: o renderer precisa estar
+`ready`, não pode haver content-sync pendente, frame e manifest precisam existir
+e o contexto técnico deve corresponder exatamente à seleção estrutural atual de
+brand, family, variant e format. Botões e guardas programáticas usam esse mesmo
+contrato. Um mutex compartilhado impede concorrência entre **Baixar atual** e
+**Baixar ambos** e é liberado em `finally`, sem remover outras razões de loading.
+
+Brand e family são compartilhados. Quando mudam, os contexts Feed e Story são
+invalidados antes de qualquer espera, suas versões antigas perdem autoridade e
+cada formato escolhe independentemente uma variant válida na nova combinação.
+Em Compare, os dois renderers válidos resolvem em paralelo; formato ausente ou
+falha de resolução limpa somente seu próprio frame, invalida readiness e mostra
+um placeholder, preservando o outro painel. **Nova arte** aplica a mesma
+invalidação técnica aos dois contexts antes de resolver o Story default.
+
+Os globais técnicos que passaram a ter autoridade por formato são frame,
+template, page, manifest, formato, tema, image adjustments, initialization
+version e initialized template/page. No controller, `renderer`, `previewState`,
+renderer request ID e content-sync ID também passaram a ser por formato.
+Cache/proveniência de notícia e `publication.content` continuam únicos.
 
 O estado transitório `activeFormat` pode ser `story` ou `feed` e permanece fora
 da `publication`. A aba ativa determina, de ponta a ponta, a seleção no catálogo,
@@ -25,7 +72,7 @@ dimensões do manifest atual, não a escala visual do workspace.
 Trocas de formato invalidam resoluções e sincronizações anteriores. Uma conclusão
 tardia de Feed não pode substituir Story, alterar readiness ou liberar download.
 **Nova arte** limpa o conteúdo, recria os defaults dos dois formatos e volta para
-Story. **Comparar** e **Baixar ambos** continuam desabilitados e fora do escopo.
+Story. **Comparar** e **Baixar ambos** usam os contexts reais descritos acima.
 
 A resolução do renderer captura somente a seleção estrutural de marca, família,
 variante e formato. Depois da resolução, o snapshot atual de conteúdo, tema e

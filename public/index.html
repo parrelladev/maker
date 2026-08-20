@@ -3,108 +3,555 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>Maker</title>
+
   <link rel="stylesheet" href="styles.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+  <link
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+    rel="stylesheet"
+  >
   <link rel="shortcut icon" href="favicon.svg">
 </head>
+
 <body>
   <div class="editor-app">
+
     <header class="editor-header">
-      <a class="editor-brand" href="/" aria-label="Maker — página inicial"><img src="logo-maker.png" alt="Maker" class="editor-logo"></a>
-      <button class="button button-secondary" type="button" id="newArtworkBtn" data-action="new-artwork">Nova arte</button>
+      <div class="header-left">
+        <a
+          class="editor-brand"
+          href="/"
+          aria-label="Maker — página inicial"
+        >
+          <img
+            src="logo-maker.png"
+            alt="Maker"
+            class="editor-logo"
+          >
+        </a>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <button
+          class="button button-secondary"
+          type="button"
+          id="newArtworkBtn"
+          data-action="new-artwork"
+        >
+          Nova arte
+        </button>
+      </div>
+
+      <div class="header-right">
+        <div
+          class="editor-status"
+          data-editor-status
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            class="status-indicator"
+            aria-hidden="true"
+          ></span>
+
+          <span>Pronto</span>
+        </div>
+
+        <span class="header-divider" aria-hidden="true"></span>
+
+        <div class="header-actions">
+          <button
+            class="button button-secondary"
+            type="button"
+            data-action="download-all"
+            disabled
+          >
+            Baixar ambos
+          </button>
+
+          <button
+            class="button button-primary"
+            type="button"
+            id="generateBtn"
+            data-action="download-current"
+          >
+            Baixar atual
+          </button>
+        </div>
+      </div>
     </header>
 
-    <main class="editor-main">
-      <aside class="editor-sidebar" aria-labelledby="editorSidebarTitle">
-        <h1 id="editorSidebarTitle">Conteúdo da arte</h1>
 
-        <section class="editor-section" aria-labelledby="contentSectionTitle">
-          <h2 id="contentSectionTitle">Conteúdo</h2>
+    <main class="editor-main">
+
+      <aside
+        class="editor-sidebar"
+        aria-labelledby="editorSidebarTitle"
+      >
+
+        <h1
+          id="editorSidebarTitle"
+          class="visually-hidden"
+        >
+          Conteúdo da arte
+        </h1>
+
+
+        <section
+          class="editor-section"
+          aria-labelledby="contentSectionTitle"
+        >
+          <h2 id="contentSectionTitle">
+            Conteúdo
+          </h2>
+
           <div class="field-group">
-            <label for="newsUrl">URL da notícia</label>
-            <input type="url" id="newsUrl" data-field="url" placeholder="Cole o link da notícia" autocomplete="url" required>
+            <label for="newsUrl">
+              URL da notícia
+            </label>
+
+            <input
+              type="url"
+              id="newsUrl"
+              data-field="url"
+              placeholder="Cole o link da notícia"
+              autocomplete="url"
+              required
+            >
           </div>
-          <button class="button button-primary button-full" type="button" id="fetchDataBtn" data-action="import-news">Importar notícia</button>
+
+          <button
+            class="button button-primary button-full"
+            type="button"
+            id="fetchDataBtn"
+            data-action="import-news"
+          >
+            Importar notícia
+          </button>
         </section>
 
-        <section class="editor-section" aria-labelledby="configurationSectionTitle">
-          <h2 id="configurationSectionTitle">Configuração</h2>
+
+        <section
+          class="editor-section"
+          aria-labelledby="configurationSectionTitle"
+        >
+          <h2 id="configurationSectionTitle">
+            Configuração
+          </h2>
+
           <div class="field-group">
-            <label for="brandControl">Marca</label>
-            <select id="brandControl" data-control="brand" disabled><option>Carregando...</option></select>
+            <label for="brandControl">
+              Marca
+            </label>
+
+            <select
+              id="brandControl"
+              data-control="brand"
+              disabled
+            >
+              <option>Carregando...</option>
+            </select>
           </div>
+
           <div class="field-group">
-            <label for="familyControl">Família</label>
-            <select id="familyControl" data-control="family" disabled><option>Selecione...</option></select>
+            <label for="familyControl">
+              Família
+            </label>
+
+            <select
+              id="familyControl"
+              data-control="family"
+              disabled
+            >
+              <option>Selecione...</option>
+            </select>
           </div>
+
+
           <fieldset class="choice-group">
-            <legend>Variante</legend>
-            <div class="variant-grid" data-control="variants" aria-live="polite"><p class="control-placeholder">As variantes aparecerão aqui.</p></div>
+            <legend>
+              Variante
+            </legend>
+
+            <div
+              class="variant-grid"
+              data-control="variants"
+              aria-live="polite"
+            >
+              <p class="control-placeholder">
+                As variantes aparecerão aqui.
+              </p>
+            </div>
           </fieldset>
+
+
           <fieldset class="choice-group">
-            <legend>Tema</legend>
-            <div class="theme-options" data-control="themes" aria-live="polite"><p class="control-placeholder">Os temas aparecerão aqui.</p></div>
-            <div class="legacy-theme-control visually-hidden" id="themeWrapper" aria-hidden="true">
-              <label for="customTheme">Tema legado</label>
-              <select id="customTheme" data-control="theme" tabindex="-1"></select>
+            <legend>
+              Tema
+            </legend>
+
+            <div
+              class="theme-options"
+              data-control="themes"
+              aria-live="polite"
+            >
+              <p class="control-placeholder">
+                Os temas aparecerão aqui.
+              </p>
+            </div>
+
+            <div
+              class="legacy-theme-control visually-hidden"
+              id="themeWrapper"
+              aria-hidden="true"
+            >
+              <label for="customTheme">
+                Tema legado
+              </label>
+
+              <select
+                id="customTheme"
+                data-control="theme"
+                tabindex="-1"
+              ></select>
             </div>
           </fieldset>
         </section>
 
-        <section class="editor-section" aria-labelledby="textSectionTitle">
-          <h2 id="textSectionTitle">Texto</h2>
-          <div class="field-group"><label for="customTag">Categoria / Chapéu</label><input type="text" id="customTag" data-field="tag" placeholder="Usar texto importado"></div>
-          <div class="field-group"><label for="customTitle">Título</label><textarea id="customTitle" data-field="title" rows="3" placeholder="Usar título importado"></textarea></div>
-          <div class="field-group"><label for="customSubtitle">Subtítulo</label><textarea id="customSubtitle" data-field="subtitle" rows="3" placeholder="Usar subtítulo importado"></textarea></div>
-        </section>
 
-        <section class="editor-section" aria-labelledby="imageSectionTitle">
-          <h2 id="imageSectionTitle">Imagem</h2>
-          <div class="current-image" data-current-image><span aria-hidden="true">Imagem</span><p>Nenhuma imagem selecionada</p></div>
-          <div class="field-group"><label for="customImageUrl">URL da imagem</label><input type="url" id="customImageUrl" data-field="image" placeholder="Usar imagem importada"></div>
-          <button class="button button-secondary button-full" type="button" data-action="replace-image">Trocar imagem</button>
-          <div class="image-adjustments" data-control="image-adjustments" hidden>
-            <div class="range-field"><label for="imageZoom">Zoom <output data-value-for="zoom">1</output></label><input type="range" id="imageZoom" data-image-adjustment="zoom" min="1" max="3" step="0.05" value="1"></div>
-            <div class="range-field"><label for="imagePositionX">Horizontal <output data-value-for="x">50</output></label><input type="range" id="imagePositionX" data-image-adjustment="x" min="0" max="100" step="1" value="50"></div>
-            <div class="range-field"><label for="imagePositionY">Vertical <output data-value-for="y">50</output></label><input type="range" id="imagePositionY" data-image-adjustment="y" min="0" max="100" step="1" value="50"></div>
-            <button class="button button-secondary button-full" type="button" data-action="reset-image-adjustments">Redefinir enquadramento</button>
+        <section
+          class="editor-section"
+          aria-labelledby="textSectionTitle"
+        >
+          <h2 id="textSectionTitle">
+            Texto
+          </h2>
+
+          <div class="field-group">
+            <label for="customTag">
+              Categoria / Chapéu
+            </label>
+
+            <input
+              type="text"
+              id="customTag"
+              data-field="tag"
+              placeholder="Usar texto importado"
+            >
+          </div>
+
+          <div class="field-group">
+            <label for="customTitle">
+              Título
+            </label>
+
+            <textarea
+              id="customTitle"
+              data-field="title"
+              rows="3"
+              placeholder="Usar título importado"
+            ></textarea>
+          </div>
+
+          <div class="field-group">
+            <label for="customSubtitle">
+              Subtítulo
+            </label>
+
+            <textarea
+              id="customSubtitle"
+              data-field="subtitle"
+              rows="3"
+              placeholder="Usar subtítulo importado"
+            ></textarea>
           </div>
         </section>
+
+
+        <section
+          class="editor-section"
+          aria-labelledby="imageSectionTitle"
+        >
+          <h2 id="imageSectionTitle">
+            Imagem
+          </h2>
+
+          <div
+            class="current-image"
+            data-current-image
+          >
+            <span aria-hidden="true">
+              Imagem
+            </span>
+
+            <p>
+              Nenhuma imagem selecionada
+            </p>
+          </div>
+
+          <div class="field-group">
+            <label for="customImageUrl">
+              URL da imagem
+            </label>
+
+            <input
+              type="url"
+              id="customImageUrl"
+              data-field="image"
+              placeholder="Usar imagem importada"
+            >
+          </div>
+
+          <button
+            class="button button-secondary button-full"
+            type="button"
+            data-action="replace-image"
+          >
+            Trocar imagem
+          </button>
+
+
+          <div
+            class="image-adjustments"
+            data-control="image-adjustments"
+            hidden
+          >
+            <div class="range-field">
+              <label for="imageZoom">
+                Zoom
+                <output data-value-for="zoom">1</output>
+              </label>
+
+              <input
+                type="range"
+                id="imageZoom"
+                data-image-adjustment="zoom"
+                min="1"
+                max="3"
+                step="0.05"
+                value="1"
+              >
+            </div>
+
+            <div class="range-field">
+              <label for="imagePositionX">
+                Horizontal
+                <output data-value-for="x">50</output>
+              </label>
+
+              <input
+                type="range"
+                id="imagePositionX"
+                data-image-adjustment="x"
+                min="0"
+                max="100"
+                step="1"
+                value="50"
+              >
+            </div>
+
+            <div class="range-field">
+              <label for="imagePositionY">
+                Vertical
+                <output data-value-for="y">50</output>
+              </label>
+
+              <input
+                type="range"
+                id="imagePositionY"
+                data-image-adjustment="y"
+                min="0"
+                max="100"
+                step="1"
+                value="50"
+              >
+            </div>
+
+            <button
+              class="button button-secondary button-full"
+              type="button"
+              data-action="reset-image-adjustments"
+            >
+              Redefinir enquadramento
+            </button>
+          </div>
+        </section>
+
       </aside>
 
-      <section class="editor-workspace" id="editorWorkspace" aria-labelledby="workspaceTitle">
+
+      <section
+        class="editor-workspace"
+        id="editorWorkspace"
+        aria-labelledby="workspaceTitle"
+      >
         <div class="workspace-heading">
-          <div><p class="workspace-eyebrow">Formato</p><h2 id="workspaceTitle">Preview</h2></div>
-          <div class="view-mode-toolbar" role="group" aria-label="Modo de visualização">
-            <button type="button" data-view-mode="feed" aria-pressed="false">Feed</button>
-            <button type="button" class="is-active" data-view-mode="story" aria-pressed="true">Story</button>
-            <button type="button" data-view-mode="compare" aria-pressed="false" disabled>Comparar</button>
+          <h2 id="workspaceTitle">
+            Preview
+          </h2>
+
+          <div
+            class="view-mode-toolbar"
+            role="group"
+            aria-label="Modo de visualização"
+          >
+            <button
+              type="button"
+              data-view-mode="feed"
+              aria-pressed="false"
+            >
+              Feed
+            </button>
+
+            <button
+              type="button"
+              class="is-active"
+              data-view-mode="story"
+              aria-pressed="true"
+            >
+              Story
+            </button>
+
+            <button
+              type="button"
+              data-view-mode="compare"
+              aria-pressed="false"
+            >
+              Comparar
+            </button>
           </div>
         </div>
-        <div class="preview-stage">
-          <div class="preview-container">
-            <div class="preview-frame-wrapper" data-preview-viewport>
-              <iframe id="previewFrame" title="Prévia da arte" class="preview-frame" loading="lazy"></iframe>
-              <div class="preview-placeholder" id="previewPlaceholder"><strong>Sua arte aparecerá aqui</strong><p>Importe uma notícia para montar o preview no renderer real.</p></div>
+
+
+        <div
+          class="preview-stage"
+          data-preview-stage
+          data-view-mode="story"
+        >
+
+          <div
+            class="preview-panel"
+            data-preview-panel="feed"
+            hidden
+          >
+            <button
+              class="preview-panel-selector"
+              type="button"
+              data-select-preview-format="feed"
+              aria-pressed="false"
+            >
+              Feed
+            </button>
+
+            <div class="preview-container">
+              <div
+                class="preview-frame-wrapper"
+                data-preview-viewport
+                data-preview-format="feed"
+              >
+                <iframe
+                  id="previewFrameFeed"
+                  data-preview-frame="feed"
+                  title="Prévia Feed"
+                  class="preview-frame"
+                  loading="lazy"
+                ></iframe>
+
+                <div
+                  class="preview-placeholder"
+                  data-preview-placeholder="feed"
+                >
+                  <strong>Feed</strong>
+                  <p>Preparando preview.</p>
+                </div>
+              </div>
             </div>
           </div>
+
+
+          <div
+            class="preview-panel is-active"
+            data-preview-panel="story"
+          >
+            <button
+              class="preview-panel-selector"
+              type="button"
+              data-select-preview-format="story"
+              aria-pressed="true"
+            >
+              Story
+            </button>
+
+            <div class="preview-container">
+              <div
+                class="preview-frame-wrapper"
+                data-preview-viewport
+                data-preview-format="story"
+              >
+                <iframe
+                  id="previewFrame"
+                  data-preview-frame="story"
+                  title="Prévia Story"
+                  class="preview-frame"
+                  loading="lazy"
+                ></iframe>
+
+                <div
+                  class="preview-placeholder"
+                  id="previewPlaceholder"
+                  data-preview-placeholder="story"
+                >
+                  <strong>
+                    Sua arte aparecerá aqui
+                  </strong>
+
+                  <p>
+                    Importe uma notícia para montar o preview no renderer real.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </section>
+
     </main>
 
-    <footer class="editor-footer">
-      <div class="editor-status" data-editor-status role="status" aria-live="polite"><span class="status-indicator" aria-hidden="true"></span><span>Pronto</span></div>
-      <div class="footer-actions">
-        <button class="button button-secondary" type="button" data-action="download-all" disabled>Baixar ambos</button>
-        <button class="button button-primary" type="button" id="generateBtn" data-action="download-current">Baixar atual</button>
-      </div>
-    </footer>
   </div>
 
-  <div class="loading-overlay" id="loadingOverlay" aria-live="polite" aria-label="Processando"><div class="loading-content"><span class="loading-spinner" aria-hidden="true"></span><p>Criando sua arte...</p></div></div>
-  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <div
+    class="loading-overlay"
+    id="loadingOverlay"
+    aria-live="polite"
+    aria-label="Processando"
+  >
+    <div class="loading-content">
+      <span
+        class="loading-spinner"
+        aria-hidden="true"
+      ></span>
+
+      <p>
+        Criando sua arte...
+      </p>
+    </div>
+  </div>
+
+
+  <div
+    class="toast-container"
+    id="toastContainer"
+    aria-live="polite"
+  ></div>
+
+
   <script src="js/api.js"></script>
   <script src="js/preview-export.js"></script>
   <script src="js/frontend-utils.js"></script>

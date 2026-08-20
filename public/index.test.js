@@ -4,14 +4,16 @@ const cheerio = require('cheerio');
 
 describe('shell do editor', () => {
   let $;
+  let styles;
   beforeAll(() => {
     $ = cheerio.load(fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'));
+    styles = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
   });
 
   test('possui os containers semânticos principais', () => {
     expect($('.editor-app > .editor-header')).toHaveLength(1);
     expect($('.editor-app > .editor-main')).toHaveLength(1);
-    expect($('.editor-app > .editor-footer')).toHaveLength(1);
+    expect($('.editor-header .header-actions')).toHaveLength(1);
   });
 
   test('expõe sidebar e workspace simultaneamente na tela principal', () => {
@@ -21,17 +23,23 @@ describe('shell do editor', () => {
   });
 
   test('mantém o iframe real dentro do viewport de preview', () => {
-    expect($('[data-preview-viewport] > iframe#previewFrame')).toHaveLength(1);
+    expect($('[data-preview-viewport][data-preview-format="story"] > iframe[data-preview-frame="story"]')).toHaveLength(1);
+    expect($('[data-preview-viewport][data-preview-format="feed"] > iframe[data-preview-frame="feed"]')).toHaveLength(1);
   });
 
   test.each(['feed', 'story', 'compare'])('oferece o modo de visualização %s', mode => {
     expect($(`button[data-view-mode="${mode}"]`)).toHaveLength(1);
   });
 
+  test('painel individual ocupa a largura disponível sem alterar o limite do modo comparar', () => {
+    expect(styles).toMatch(/\.preview-panel\s*{[^}]*width:\s*100%;/s);
+    expect(styles).toMatch(/\.preview-stage\[data-view-mode="compare"\] \.preview-panel\s*{[^}]*width:\s*min\(50%, 430px\);/s);
+  });
+
   test('marca Story como modo inicial', () => {
     expect($('button[data-view-mode="story"]').attr('aria-pressed')).toBe('true');
     expect($('button[data-view-mode="feed"]').attr('disabled')).toBeUndefined();
-    expect($('button[data-view-mode="compare"][disabled]')).toHaveLength(1);
+    expect($('button[data-view-mode="compare"]').attr('disabled')).toBeUndefined();
   });
 
   test.each([
