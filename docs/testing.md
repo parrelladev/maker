@@ -210,7 +210,17 @@ classificados. Ela também reproduz o contrato Promise-based transformado por
 adaptador Node, lookup e socket reais, confirmando o IP e o cabeçalho `Host`.
 Testes com relógio injetado verificam a deadline total, DNS pendente, DNS lento,
 saldo repassado a cada redirect, conclusão dentro do orçamento e remoção de
-timers em sucesso e erro.
+timers em sucesso e erro. A suíte também inicia processos-filhos que já nascem
+com `NODE_USE_ENV_PROXY=1`, `HTTP_PROXY` e `HTTPS_PROXY`; os destinos HTTP e
+HTTPS e o proxy local contabilizam separadamente conexões TCP e requisições.
+Nos dois protocolos, os testes confirmam conexão no IP fixado, `Host` original
+e zero conexões e requisições no proxy. O cenário HTTPS confia somente no
+certificado de fixture por `NODE_EXTRA_CA_CERTS`, observa o SNI original no
+servidor e também confirma que o mesmo certificado é rejeitado sem essa
+confiança explícita. Outro teste faz duas validações sucessivas do mesmo
+hostname para IPs locais diferentes e comprova que a segunda requisição não
+reutiliza o socket da primeira. A chave privada correspondente ao certificado
+é uma fixture sem uso fora da suíte.
 
 A suíte de `src/lib/svgSanitizer.test.js` cobre parsing XML estrito, raiz SVG,
 limite de bytes, scripts, handlers, `foreignObject`, CSS não suportado, URLs
@@ -364,7 +374,7 @@ opcionais ausentes e atualizações repetidas.
 | `src/lib/assetResolver.js` | `createLogoAssetResolver` e `resolveLogoAsset` | SVG local, imagem local e remota, ordem de extensões, capacidade máxima, descarte FIFO, ausência de cache negativo, retry após falhas e cache sem compartilhamento de texto alternativo |
 | `src/lib/imageValidator.js` | `validateImageResponse` | allowlist de MIME, corpo binário, tamanho, vazio e assinaturas básicas |
 | `src/lib/remoteRequestPolicy.js` | políticas de HTML, imagem e SVG | valores concretos, `User-Agent`s e imutabilidade |
-| `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, contrato Axios e conexão local real |
+| `src/lib/safeHttpClient.js` | `get`, lookup, validação e classificação | protocolos, credenciais, DNS, IPv4/IPv6, redirects, limites, Agents HTTP/HTTPS por salto, bloqueio de proxy ambiental, contrato Axios e conexão local real |
 | `src/lib/svgSanitizer.js` | `sanitizeSvg` | XML estrito, gramáticas de valores, CSS local simples, referências locais, idempotência, limite e SVGs maliciosos representativos |
 | `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |

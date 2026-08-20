@@ -239,11 +239,26 @@ resolve DNS: ele entrega somente um endereço do conjunto previamente validado.
 Uma única deadline monotônica cobre a cadeia inteira; DNS e cada chamada Axios
 recebem apenas o tempo restante, sem reiniciar o timeout em cada salto.
 
+Em Node 24.5 ou posterior, `NODE_USE_ENV_PROXY=1` pode tornar os Agents globais
+sensíveis a `HTTP_PROXY` e `HTTPS_PROXY`, contornando o `lookup` fornecido pela
+aplicação mesmo quando o Axios recebe `proxy: false`. O `safeHttpClient` não usa
+esses Agents globais: cada salto recebe Agents HTTP e HTTPS explícitos, sem
+keep-alive, além do lookup fixado. Assim, proxy ambiental não participa das
+requisições desse cliente, o socket continua subordinado ao endereço validado e
+um salto não reutiliza conexão criada para uma validação anterior.
+
 - **Defesa existente:** um redirect público para destino privado é rejeitado.
-- **Defesa existente:** o cliente desabilita proxy para que a conexão use o
+- **Defesa existente:** o cliente desabilita proxy no Axios e usa Agents
+  explícitos próprios para impedir que proxy nativo do runtime contorne o
   endereço validado pelo `lookup`.
 - **Defesa existente:** o teste de integração local confirma o endereço usado
   pelo socket e a preservação do hostname no cabeçalho `Host`.
+- **Defesa existente:** testes em processos-filhos ativam proxy ambiental antes
+  do carregamento do runtime e confirmam, para HTTP e HTTPS, zero conexões TCP e
+  zero requisições no proxy, uso do lookup fixado e conexão no destino
+  validado. O cenário HTTPS preserva `Host` e SNI e confia explicitamente apenas
+  no certificado local da fixture; sem essa confiança, a validação TLS rejeita
+  a conexão.
 - **Hipótese a testar:** redirects reais, ciclos, respostas comprimidas e falhas
   entre resolução e socket.
 
