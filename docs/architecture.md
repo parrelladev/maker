@@ -636,8 +636,10 @@ permanece na mesma origem, o frontend acessa diretamente `contentDocument` e
 
 Há duas escalas:
 
-- `resizePreviewFrame` aplica um `transform` ao próprio `iframe`, calculado pela
-  largura do wrapper e por uma largura fixa de 1080;
+- `resizePreviewFrame` aplica um `transform` ao próprio `iframe`, calculado pelo
+  menor limite entre a largura natural do wrapper e a altura disponível no
+  contêiner. O wrapper acompanha as dimensões visuais resultantes, enquanto o
+  iframe preserva o canvas de 1080 x 1920 usado na exportação;
 - `PreviewRuntime.applyScale`, dentro do iframe, escala o elemento `html` de acordo com
   as dimensões do manifest e o viewport interno.
 

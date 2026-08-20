@@ -43,6 +43,7 @@ class FakeElement {
     this.classList = new FakeClassList();
     this.listeners = {};
     this.clientWidth = 540;
+    this.clientHeight = 960;
     this.focus = jest.fn();
   }
 
@@ -133,12 +134,17 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   elements.previewFrame.contentDocument = frameDocument;
   elements.previewFrame.contentWindow = { document: frameDocument };
 
+  const previewWrapper = new FakeElement('preview-frame-wrapper');
+  const previewContainer = new FakeElement('preview-container');
   const documentListeners = {};
   const document = {
     getElementById: id => elements[id] || null,
     querySelector: selector => {
       if (selector === '.preview-frame-wrapper') {
-        return new FakeElement('preview-frame-wrapper');
+        return previewWrapper;
+      }
+      if (selector === '.preview-container') {
+        return previewContainer;
       }
       if (selector === '[data-control="themes"]') {
         return elements.themeOptions;
@@ -214,6 +220,8 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   return {
     context,
     elements,
+    previewContainer,
+    previewWrapper,
     extractNewsData,
     frameDocument,
     loadManifest,
@@ -916,6 +924,18 @@ describe('readiness editorial e exportação legada', () => {
 });
 
 describe('contrato de estado de public/script.js', () => {
+  test('reduz o preview pela altura disponível sem cortar a arte', () => {
+    const harness = createHarness();
+    harness.previewContainer.clientHeight = 400;
+
+    harness.run('resizePreviewFrame()');
+
+    expect(harness.previewWrapper.style.width).toBe('225px');
+    expect(harness.previewWrapper.style.height).toBe('400px');
+    expect(harness.elements.previewFrame.style.transform)
+      .toBe('translate(-50%, -50%) scale(0.20833333333333334)');
+  });
+
   test('inicialização oculta apenas o controle legado e preserva as opções visuais de tema', () => {
     const harness = createHarness();
 

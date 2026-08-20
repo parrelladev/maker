@@ -254,12 +254,22 @@ function isStaleOperationError(error) {
 
 function resizePreviewFrame() {
   const wrapper = document.querySelector('.preview-frame-wrapper');
+  const container = document.querySelector('.preview-container');
   if (!wrapper || !previewFrame) return;
 
-  const wrapperWidth = wrapper.clientWidth;
-  if (!wrapperWidth) return;
+  wrapper.style.width = '';
+  wrapper.style.height = '';
 
-  const scale = wrapperWidth / 1080; // 1080 = largura real do canvas
+  const availableWidth = wrapper.clientWidth;
+  const availableHeight = container?.clientHeight;
+  if (!availableWidth) return;
+
+  const widthScale = availableWidth / 1080;
+  const heightScale = availableHeight ? availableHeight / 1920 : widthScale;
+  const scale = Math.min(widthScale, heightScale);
+
+  wrapper.style.width = `${1080 * scale}px`;
+  wrapper.style.height = `${1920 * scale}px`;
   previewFrame.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
