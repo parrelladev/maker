@@ -1,0 +1,6 @@
+{
+  "id": "brand-b",
+  "name": "Brand B from brand.json",
+  "logos": { "primary": "logos/primary.svg" },
+  "fonts": { "body": { "regular": "fonts/body-regular.woff2" } }
+}

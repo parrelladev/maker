@@ -1,0 +1,12 @@
+{
+  "editor": {
+    "brand": "brand-b",
+    "family": "padrao",
+    "variant": "texto",
+    "label": "Texto"
+  },
+  "formats": {
+    "story": { "dimensions": { "width": 1080, "height": 1920 } }
+  },
+  "themes": []
+}

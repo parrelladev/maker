@@ -1,0 +1,14 @@
+{
+  "editor": {
+    "brand": "thirdbrand",
+    "family": "especial",
+    "variant": "quote-card",
+    "label": "Quote card"
+  },
+  "formats": {
+    "square": { "dimensions": { "width": 900, "height": 900 } }
+  },
+  "themes": [
+    { "id": "green", "label": "Green" }
+  ]
+}

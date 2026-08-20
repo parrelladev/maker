@@ -1,0 +1,6 @@
+{
+  "id": "thirdbrand",
+  "name": "Third Brand",
+  "logos": { "primary": "logos/primary.svg" },
+  "fonts": { "body": { "regular": "fonts/body-regular.woff2" } }
+}

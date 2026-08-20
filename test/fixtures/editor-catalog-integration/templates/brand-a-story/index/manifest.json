@@ -1,0 +1,15 @@
+{
+  "editor": {
+    "brand": "brand-a",
+    "family": "padrao",
+    "variant": "foto-acima",
+    "label": "Foto acima"
+  },
+  "formats": {
+    "story": { "dimensions": { "width": 1080, "height": 1920 } }
+  },
+  "themes": [
+    { "id": "azul", "label": "Azul" },
+    { "id": "preto", "label": "Preto" }
+  ]
+}

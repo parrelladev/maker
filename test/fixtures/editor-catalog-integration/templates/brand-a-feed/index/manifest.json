@@ -1,0 +1,14 @@
+{
+  "editor": {
+    "brand": "brand-a",
+    "family": "padrao",
+    "variant": "foto-acima",
+    "label": "Foto acima"
+  },
+  "formats": {
+    "feed": { "dimensions": { "width": 1080, "height": 1350 } }
+  },
+  "themes": [
+    { "id": "paper", "label": "Paper" }
+  ]
+}

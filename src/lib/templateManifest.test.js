@@ -20,6 +20,7 @@ describe('templateManifest', () => {
     const manifest = { dimensions: { width: 1080, height: 1920 } };
     expect(validateManifest(manifest)).toBe(manifest);
     expect(normalizeManifest(manifest)).toEqual({ ...manifest, editorial: null });
+    expect(getEditorialMetadata(manifest)).toBeNull();
   });
 
   test('aceita manifest editorial e expõe representação normalizada', () => {

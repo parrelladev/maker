@@ -68,6 +68,39 @@ identidade vem exclusivamente dos metadados. Um mesmo renderer técnico pode,
 portanto, declarar vários formatos e temas sem que a organização de arquivos
 se torne parte do domínio.
 
+## Catálogo editorial derivado
+
+`src/lib/editorCatalog.js` reúne os manifests editoriais descobertos por
+`inspectTemplateCatalog()` na hierarquia pública marca → família → variante →
+formato → tema. Ele não mantém listas de IDs conhecidas: a identidade e o nome
+da marca vêm do Brand Registry, enquanto família, variante, formatos, dimensões
+e temas vêm dos manifests. Como ainda não existe um registry de famílias, o ID
+da família também é usado temporariamente como seu label.
+
+`getEditorialMetadata()` é a única fronteira usada para interpretar o domínio
+editorial do manifest. Seu retorno `null` identifica manifests legados, que
+continuam disponíveis para o renderer técnico, mas não entram no catálogo e não
+recebem identidade inferida por diretório ou filename. Uma marca referenciada
+por manifest precisa existir no Brand Registry; referências desconhecidas
+interrompem a construção com um erro de configuração explícito.
+
+Manifests com a mesma combinação marca/família/variante são agregados em uma
+única variante, permitindo que renderers diferentes acrescentem formatos como
+`story`, `feed` ou qualquer ID futuro. Labels divergentes para essa variante e
+renderers técnicos diferentes para a mesma combinação completa até formato são
+conflitos explícitos, nunca escolhas baseadas na ordem do filesystem.
+
+O catálogo público contém somente IDs, labels, nome de marca, dimensões e temas,
+todos ordenados deterministicamente por ID. A referência técnica relativa
+`{ template, page }` fica em um índice privado e é obtida por
+`resolveRenderer()` com seleção exata de marca, família, variante e formato;
+tema não escolhe renderer e não há fallback para a primeira opção. Nenhum path
+absoluto ou raiz do filesystem faz parte da representação serializável.
+
+No schema atual, `themes` pertence ao renderer como um todo. Assim, todos os
+formatos declarados pelo mesmo manifest compartilham o mesmo conjunto de temas;
+temas específicos por formato exigiriam uma evolução futura do schema.
+
 ## Finalidade da aplicação
 
 O Maker é uma aplicação web para produzir artes PNG a partir de templates

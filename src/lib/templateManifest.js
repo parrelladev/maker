@@ -100,6 +100,7 @@ function normalizeManifest(manifest) {
 
 function getEditorialMetadata(manifest) {
   const normalized = normalizeManifest(manifest);
+  if (normalized.editorial === null) return null;
   return {
     editorial: normalized.editorial,
     formats: normalized.formats || {},
