@@ -19,14 +19,23 @@ describe('renderers editoriais reais da A Gazeta', () => {
       expect.objectContaining({ id: 'foto-acima', label: 'Foto acima' }),
       expect.objectContaining({ id: 'foto-abaixo', label: 'Foto abaixo' }),
     ]));
-    for (const variant of ['foto-acima', 'foto-abaixo']) {
-      expect(family.variants.find(({ id }) => id === variant).formats).toEqual([{
+    expect(family.variants.find(({ id }) => id === 'foto-abaixo').formats).toEqual([{
         id: 'story',
         dimensions: { width: 1080, height: 1920 },
         themes: THEMES,
         capabilities: { imageAdjustments: { zoom: true, position: true } },
       }]);
-    }
+    expect(family.variants.find(({ id }) => id === 'foto-acima').formats).toEqual([
+      {
+        id: 'feed', dimensions: { width: 1080, height: 1350 },
+        themes: [{ id: 'azul', label: 'Azul' }],
+        capabilities: { imageAdjustments: { zoom: true, position: true } },
+      },
+      {
+        id: 'story', dimensions: { width: 1080, height: 1920 }, themes: THEMES,
+        capabilities: { imageAdjustments: { zoom: true, position: true } },
+      },
+    ]);
 
     const fotoAcima = resolveRenderer(catalog, {
       brand: 'agazeta', family: 'padrao', variant: 'foto-acima', format: 'story',
@@ -91,6 +100,28 @@ describe('renderers editoriais reais da A Gazeta', () => {
     const files = await fs.readdir(path.resolve(`templates/${template}`), { recursive: true });
     expect(files.filter(file => path.basename(file) === 'index.html')).toHaveLength(1);
     expect(files.filter(file => path.basename(file) === 'manifest.json')).toHaveLength(1);
+  });
+
+  test('carrega o Feed real 1080x1350 com bindings, marca e ajustes de imagem', async () => {
+    const catalog = await buildEditorCatalog();
+    const renderer = resolveRenderer(catalog, {
+      brand: 'agazeta', family: 'padrao', variant: 'foto-acima', format: 'feed',
+    });
+    expect(renderer).toMatchObject({
+      template: 'agazeta-feed-foto-acima', page: 'index',
+      dimensions: { width: 1080, height: 1350 },
+      themes: [{ id: 'azul', label: 'Azul' }],
+      capabilities: { imageAdjustments: { zoom: true, position: true } },
+    });
+    const page = await loadTemplatePage(renderer.template, renderer.page);
+    expect(page.manifest.dimensions).toEqual({ width: 1080, height: 1350 });
+    expect(page.manifest.editorial).toMatchObject({
+      brand: 'agazeta', family: 'padrao', variant: 'foto-acima', label: 'Foto acima',
+    });
+    expect(page.manifest.bindings.map(binding => binding.selector))
+      .toEqual(expect.arrayContaining(['#bg', '#logo', '#title', '#subtitle', '#tag']));
+    expect(page.resolvedLogo).toMatchObject({ kind: 'inline-svg' });
+    expect(page.html).toContain('class="text"');
   });
 
   test('um template legado continua carregando pelo serviço técnico', async () => {

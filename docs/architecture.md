@@ -1,5 +1,40 @@
 # Arquitetura atual do Maker
 
+## Story e Feed operacionais
+
+O estado transitório `activeFormat` pode ser `story` ou `feed` e permanece fora
+da `publication`. A aba ativa determina, de ponta a ponta, a seleção no catálogo,
+o renderer técnico, o `currentFormat` da ponte, o payload do runtime, as
+capabilities, as dimensões do preview e o manifest usado na exportação.
+
+O conteúdo em `publication.content` continua único e compartilhado. Variante,
+tema e `{ zoom, x, y }` ficam independentes em `publication.formats.story` e
+`publication.formats.feed`; alternar abas não copia nem descarta essas
+configurações. A primeira seleção válida de cada formato é derivada da marca e
+família atuais no catálogo. Quando a configuração não oferece o formato ativo,
+o editor informa a indisponibilidade, limpa o renderer técnico e mantém o
+download bloqueado, sem usar outro formato como fallback.
+
+O primeiro Feed real é a composição histórica da A Gazeta com foto acima,
+restaurada como renderer próprio em 1080×1350. Ela mantém foto nos 55% superiores,
+logo sobre a imagem e bloco de texto abaixo, oferece o tema Azul e suporta zoom
+e posição pelo binding real de imagem. Story continua em 1080×1920. O wrapper e
+o iframe recebem dinamicamente as dimensões resolvidas; a exportação usa as
+dimensões do manifest atual, não a escala visual do workspace.
+
+Trocas de formato invalidam resoluções e sincronizações anteriores. Uma conclusão
+tardia de Feed não pode substituir Story, alterar readiness ou liberar download.
+**Nova arte** limpa o conteúdo, recria os defaults dos dois formatos e volta para
+Story. **Comparar** e **Baixar ambos** continuam desabilitados e fora do escopo.
+
+A resolução do renderer captura somente a seleção estrutural de marca, família,
+variante e formato. Depois da resolução, o snapshot atual de conteúdo, tema e
+ajustes do formato ativo é aplicado — e reaplicado se mudar durante a carga —
+antes que o preview possa ser marcado como pronto ou exportável.
+
+Tema, conteúdo e ajustes de imagem usam o mesmo sync versionado; nenhum estado
+visual pode ser considerado pronto antes de estar aplicado ao iframe.
+
 ## Capabilities editoriais e enquadramento de imagem
 
 Capabilities sÃ£o metadata declarativa de cada formato do renderer. A forma

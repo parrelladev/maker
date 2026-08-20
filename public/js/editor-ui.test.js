@@ -8,7 +8,8 @@ class FakeElement {
     this.dataset = {};
     this.listeners = {};
     this.attributes = {};
-    this.classList = { add: jest.fn() };
+    this.classList = { add: jest.fn(), toggle: jest.fn() };
+    this.style = {};
     this.disabled = false;
     this.value = '';
     this.textContent = '';
@@ -26,10 +27,15 @@ class FakeElement {
 function fixture() {
   const elements = {
     brand: new FakeElement(), family: new FakeElement(), variants: new FakeElement(), themes: new FakeElement(),
-    status: new FakeElement(), newArtwork: new FakeElement(), feed: new FakeElement(), compare: new FakeElement(),
+    status: new FakeElement(), newArtwork: new FakeElement(), feed: new FakeElement(), story: new FakeElement(), compare: new FakeElement(),
     downloadCurrent: new FakeElement(), importNews: new FakeElement(),
     imageAdjustments: new FakeElement(), resetImageAdjustments: new FakeElement(),
   };
+  elements.feed.dataset.viewMode = 'feed';
+  elements.story.dataset.viewMode = 'story';
+  elements.compare.dataset.viewMode = 'compare';
+  elements.previewViewport = new FakeElement();
+  elements.previewFrame = new FakeElement();
   elements.status.statusText = new FakeElement();
   const fields = ['url', 'title', 'subtitle', 'tag', 'image'].map(name => {
     const field = new FakeElement(); field.dataset.field = name; return field;
@@ -46,6 +52,11 @@ function fixture() {
     '[data-action="import-news"]': elements.importNews,
     '[data-control="image-adjustments"]': elements.imageAdjustments,
     '[data-action="reset-image-adjustments"]': elements.resetImageAdjustments,
+    '[data-preview-viewport]': elements.previewViewport,
+    '#previewFrame': elements.previewFrame,
+    '[data-view-mode="feed"]': elements.feed,
+    '[data-view-mode="story"]': elements.story,
+    '[data-view-mode="compare"]': elements.compare,
   };
   fields.forEach(field => { selectors[`[data-field="${field.dataset.field}"]`] = field; });
   const document = {
@@ -56,7 +67,8 @@ function fixture() {
     querySelectorAll: selector => {
       if (selector === '[data-field]') return fields;
       if (selector === '[data-image-adjustment]') return adjustmentInputs;
-      if (selector.includes('data-view-mode')) return [elements.feed, elements.compare];
+      if (selector === '[data-view-mode]') return [elements.feed, elements.story, elements.compare];
+      if (selector.includes('data-view-mode')) return [elements.feed, elements.story];
       return [];
     },
     createElement: () => new FakeElement(),
@@ -67,7 +79,10 @@ function fixture() {
 const syntheticCatalog = { brands: [{ id: 'brand-x', name: 'Brand X', families: [{
   id: 'family-y', label: 'family-y', variants: [
     { id: 'feed-only', label: 'Feed only', formats: [{ id: 'feed', themes: [] }] },
-    { id: 'variant-z', label: 'Variant Z', formats: [{ id: 'story', capabilities: { imageAdjustments: { zoom: true, position: true } }, themes: [{ id: 'green', label: 'Green' }, { id: 'black', label: 'Black' }] }] },
+    { id: 'variant-z', label: 'Variant Z', formats: [
+      { id: 'feed', dimensions: { width: 1080, height: 1350 }, capabilities: { imageAdjustments: { zoom: true, position: true } }, themes: [{ id: 'blue', label: 'Blue' }] },
+      { id: 'story', dimensions: { width: 1080, height: 1920 }, capabilities: { imageAdjustments: { zoom: true, position: true } }, themes: [{ id: 'green', label: 'Green' }, { id: 'black', label: 'Black' }, { id: 'white', label: 'White' }] },
+    ] },
     { id: 'variant-q', label: 'Variant Q', formats: [{ id: 'story', themes: [{ id: 'white', label: 'White' }] }] },
   ],
 }, { id: 'family-two', label: 'family-two', variants: [
@@ -78,6 +93,15 @@ const syntheticCatalog = { brands: [{ id: 'brand-x', name: 'Brand X', families: 
   ] }],
 }] };
 
+const multiFormatCatalog = { brands: [{ id: 'brand-x', name: 'Brand X', families: [{
+  id: 'family-y', label: 'family-y', variants: [{
+    id: 'variant-both', label: 'Variant Both', formats: [
+      { id: 'feed', dimensions: { width: 1080, height: 1350 }, capabilities: { imageAdjustments: { zoom: true, position: true } }, themes: [{ id: 'blue', label: 'Blue' }, { id: 'navy', label: 'Navy' }] },
+      { id: 'story', dimensions: { width: 1080, height: 1920 }, capabilities: { imageAdjustments: { zoom: true, position: true } }, themes: [{ id: 'green', label: 'Green' }, { id: 'black', label: 'Black' }] },
+    ],
+  }],
+}] }] };
+
 function setup(overrides = {}) {
   const dom = fixture();
   const disableReasons = new Set();
@@ -87,7 +111,11 @@ function setup(overrides = {}) {
   };
   const api = {
     getEditorCatalog: jest.fn().mockResolvedValue(syntheticCatalog),
-    resolveEditorRenderer: jest.fn().mockResolvedValue({ template: 'renderer-z', page: 'index', themes: [{ id: 'green', label: 'Green' }] }),
+    resolveEditorRenderer: jest.fn(selection => Promise.resolve({
+      template: selection.format === 'feed' ? 'renderer-feed' : 'renderer-z', page: 'index',
+      dimensions: selection.format === 'feed' ? { width: 1080, height: 1350 } : { width: 1080, height: 1920 },
+      themes: selection.format === 'feed' ? [{ id: 'blue', label: 'Blue' }] : [{ id: 'green', label: 'Green' }],
+    })),
     ...overrides.api,
   };
   const legacyBridge = {
@@ -98,6 +126,8 @@ function setup(overrides = {}) {
     applyPublicationContent: jest.fn().mockResolvedValue(),
     setNewsImportPending: jest.fn(pending => setDisabled('news-import', pending)),
     setContentSyncPending: jest.fn(pending => setDisabled('content-sync', pending)),
+    resizePreview: jest.fn(),
+    clearPreview: jest.fn(),
     reconcilePublicationContent: jest.fn(({ content }) => content),
     ...overrides.legacyBridge,
   };
@@ -181,7 +211,7 @@ describe('controller/UI editorial', () => {
     expect(harness.elements.family.children[0].textContent).toBe('family-y');
     expect(harness.elements.variants.children.map(item => item.textContent)).toEqual(['Variant Z', 'Variant Q']);
     expect(harness.elements.variants.children[0].attributes['aria-pressed']).toBe('true');
-    expect(harness.elements.themes.children.map(item => item.textContent)).toEqual(['Green', 'Black']);
+    expect(harness.elements.themes.children.map(item => item.textContent)).toEqual(['Green', 'Black', 'White']);
     expect(harness.controller.getPublication()).toMatchObject({
       brand: 'brand-x', family: 'family-y', formats: { story: { variant: 'variant-z', theme: 'green' } },
     });
@@ -220,9 +250,148 @@ describe('controller/UI editorial', () => {
     await harness.elements.themes.children[0].dispatch('click');
     expect(harness.controller.getPublication().formats.story.theme).toBe('white');
     expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(callsAfterVariant);
-    expect(harness.legacyBridge.selectTheme).toHaveBeenCalledWith('white');
+    expect(harness.legacyBridge.applyPublicationContent).toHaveBeenLastCalledWith(expect.objectContaining({
+      theme: 'white', activeFormat: 'story',
+    }));
     expect(harness.elements.downloadCurrent.disabled).toBe(false);
     expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+  });
+
+  test('theme ready blocks download immediately until the current snapshot is applied', async () => {
+    let finishTheme; let runtimeTheme = 'green';
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.legacyBridge.applyPublicationContent.mockImplementationOnce(({ theme, assertCurrent }) => (
+      new Promise(resolve => {
+        finishTheme = () => { assertCurrent(); runtimeTheme = theme; resolve(); };
+      })
+    ));
+
+    const pendingTheme = harness.controller.selectTheme('black');
+    expect(harness.controller.getPublication().formats.story.theme).toBe('black');
+    expect(harness.elements.themes.children.find(button => button.dataset.themeId === 'black')
+      .attributes['aria-pressed']).toBe('true');
+    expect(harness.disableReasons.has('content-sync')).toBe(true);
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+    expect(harness.elements.status.statusText.textContent).toBe('Atualizando preview');
+    expect(runtimeTheme).toBe('green');
+
+    finishTheme();
+    await pendingTheme;
+    expect(runtimeTheme).toBe('black');
+    expect(harness.disableReasons.has('content-sync')).toBe(false);
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+  });
+
+  test('theme B stale cannot overwrite a newer completed theme C', async () => {
+    let finishB; let finishC; let runtimeTheme = 'green';
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.legacyBridge.applyPublicationContent.mockReset()
+      .mockImplementationOnce(({ theme, assertCurrent }) => new Promise((resolve, reject) => {
+        finishB = () => {
+          try { assertCurrent(); runtimeTheme = theme; resolve(); } catch (error) { reject(error); }
+        };
+      }))
+      .mockImplementationOnce(({ theme, assertCurrent }) => new Promise(resolve => {
+        finishC = () => { assertCurrent(); runtimeTheme = theme; resolve(); };
+      }));
+
+    const pendingB = harness.controller.selectTheme('black');
+    const pendingC = harness.controller.selectTheme('white');
+    finishC();
+    await pendingC;
+    finishB();
+    await pendingB;
+
+    expect(harness.controller.getPublication().formats.story.theme).toBe('white');
+    expect(runtimeTheme).toBe('white');
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('newer slider sync applies the current theme and adjustment together', async () => {
+    let finishTheme; let finishSlider;
+    let runtimeSnapshot = { theme: 'green', zoom: 1 };
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.legacyBridge.applyPublicationContent.mockReset()
+      .mockImplementationOnce(({ theme, imageAdjustments, assertCurrent }) => new Promise((resolve, reject) => {
+        finishTheme = () => {
+          try {
+            assertCurrent();
+            runtimeSnapshot = { theme, zoom: imageAdjustments.zoom };
+            resolve();
+          } catch (error) { reject(error); }
+        };
+      }))
+      .mockImplementationOnce(({ theme, imageAdjustments, assertCurrent }) => new Promise(resolve => {
+        finishSlider = () => {
+          assertCurrent();
+          runtimeSnapshot = { theme, zoom: imageAdjustments.zoom };
+          resolve();
+        };
+      }));
+
+    const pendingTheme = harness.controller.selectTheme('black');
+    harness.adjustmentInputs[0].value = '1.4';
+    const pendingSlider = harness.adjustmentInputs[0].dispatch('input');
+    finishSlider();
+    await pendingSlider;
+    finishTheme();
+    await pendingTheme;
+
+    expect(runtimeSnapshot).toEqual({ theme: 'black', zoom: 1.4 });
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('pending Feed theme cannot touch Story after format switch', async () => {
+    let finishFeedTheme; let runtimeFormat = null; let runtimeTheme = null;
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    harness.legacyBridge.selectRenderer.mockImplementation(({ activeFormat, theme }) => {
+      runtimeFormat = activeFormat; runtimeTheme = theme; return Promise.resolve();
+    });
+    await harness.controller.initialize();
+    await harness.controller.selectFormat('feed');
+    harness.legacyBridge.applyPublicationContent.mockImplementationOnce(({ theme, assertCurrent }) => (
+      new Promise(resolve => {
+        finishFeedTheme = () => {
+          try { assertCurrent(); runtimeFormat = 'feed'; runtimeTheme = theme; } catch (_error) {}
+          resolve();
+        };
+      })
+    ));
+
+    const pendingFeedTheme = harness.controller.selectTheme('navy');
+    await harness.controller.selectFormat('story');
+    expect(runtimeFormat).toBe('story');
+    expect(runtimeTheme).toBe('green');
+    finishFeedTheme();
+    await pendingFeedTheme;
+
+    expect(harness.controller.getActiveFormat()).toBe('story');
+    expect(runtimeFormat).toBe('story');
+    expect(runtimeTheme).toBe('green');
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('theme sync failure keeps publication and blocks export', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.legacyBridge.applyPublicationContent.mockRejectedValueOnce(new Error('theme failed'));
+
+    await harness.controller.selectTheme('black');
+
+    expect(harness.controller.getPublication().formats.story.theme).toBe('black');
+    expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+    expect(harness.disableReasons.has('content-sync')).toBe(true);
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith('Erro ao sincronizar tema:', expect.any(Error));
+    errorSpy.mockRestore();
   });
 
   test('theme durante resolução pendente não declara ready nem libera download', async () => {
@@ -604,5 +773,237 @@ describe('controller/UI editorial', () => {
         imageAdjustments: { zoom: 1, x: 50, y: 50 },
       } },
     });
+  });
+
+  test('alternates Story and Feed preserving visual state and shared content', async () => {
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.adjustmentInputs[0].value = '1.5';
+    await harness.adjustmentInputs[0].dispatch('input');
+    harness.fields[1].value = 'Titulo compartilhado';
+    await harness.fields[1].dispatch('input');
+
+    await harness.controller.selectFormat('feed');
+    expect(harness.controller.getActiveFormat()).toBe('feed');
+    expect(harness.elements.feed.attributes['aria-pressed']).toBe('true');
+    expect(harness.elements.story.attributes['aria-pressed']).toBe('false');
+    expect(harness.controller.getPublication()).toMatchObject({
+      content: { title: 'Titulo compartilhado' },
+      formats: {
+        story: { variant: 'variant-z', theme: 'green', imageAdjustments: { zoom: 1.5, x: 50, y: 50 } },
+        feed: { variant: 'feed-only', theme: null, imageAdjustments: { zoom: 1, x: 50, y: 50 } },
+      },
+    });
+    expect(harness.elements.previewViewport.style.aspectRatio).toBe('1080 / 1350');
+    harness.adjustmentInputs[0].value = '1.2';
+    await harness.adjustmentInputs[0].dispatch('input');
+
+    await harness.controller.selectFormat('story');
+    expect(harness.adjustmentInputs[0].value).toBe('1.5');
+    await harness.controller.selectFormat('feed');
+    expect(harness.adjustmentInputs[0].value).toBe('1.2');
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', content: expect.objectContaining({ title: 'Titulo compartilhado' }),
+      imageAdjustments: { zoom: 1.2, x: 50, y: 50 },
+    }));
+  });
+
+  test('applies the current theme when Feed resolution finishes', async () => {
+    let resolveFeed;
+    const harness = setup({ api: {
+      getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog),
+      resolveEditorRenderer: jest.fn()
+        .mockResolvedValueOnce({ template: 'renderer-story', page: 'index', dimensions: { width: 1080, height: 1920 }, themes: [] })
+        .mockImplementationOnce(() => new Promise(resolve => { resolveFeed = resolve; })),
+    } });
+    await harness.controller.initialize();
+
+    const pendingFeed = harness.controller.selectFormat('feed');
+    harness.controller.selectTheme('navy');
+    expect(harness.controller.getPublication().formats.feed.theme).toBe('navy');
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+    resolveFeed({ template: 'renderer-feed', page: 'index', dimensions: { width: 1080, height: 1350 }, themes: [] });
+    await pendingFeed;
+
+    expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(2);
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', theme: 'navy',
+    }));
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('applies current zoom and position before pending Feed becomes ready', async () => {
+    let resolveFeed;
+    const harness = setup({ api: {
+      getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog),
+      resolveEditorRenderer: jest.fn()
+        .mockResolvedValueOnce({ template: 'renderer-story', page: 'index', dimensions: { width: 1080, height: 1920 }, themes: [] })
+        .mockImplementationOnce(() => new Promise(resolve => { resolveFeed = resolve; })),
+    } });
+    await harness.controller.initialize();
+
+    const pendingFeed = harness.controller.selectFormat('feed');
+    for (const [index, value] of [[0, '1.4'], [1, '20'], [2, '75']]) {
+      harness.adjustmentInputs[index].value = value;
+      await harness.adjustmentInputs[index].dispatch('input');
+    }
+    expect(harness.legacyBridge.applyPublicationContent).not.toHaveBeenCalledWith(expect.objectContaining({
+      activeFormat: 'feed',
+    }));
+    resolveFeed({ template: 'renderer-feed', page: 'index', dimensions: { width: 1080, height: 1350 }, themes: [] });
+    await pendingFeed;
+
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', imageAdjustments: { zoom: 1.4, x: 20, y: 75 },
+    }));
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('applies content edited while Feed resolution is pending', async () => {
+    let resolveFeed;
+    const harness = setup({ api: {
+      getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog),
+      resolveEditorRenderer: jest.fn()
+        .mockResolvedValueOnce({ template: 'renderer-story', page: 'index', dimensions: { width: 1080, height: 1920 }, themes: [] })
+        .mockImplementationOnce(() => new Promise(resolve => { resolveFeed = resolve; })),
+    } });
+    await harness.controller.initialize();
+
+    const pendingFeed = harness.controller.selectFormat('feed');
+    harness.fields[1].value = 'Titulo atual durante resolve';
+    await harness.fields[1].dispatch('input');
+    resolveFeed({ template: 'renderer-feed', page: 'index', dimensions: { width: 1080, height: 1350 }, themes: [] });
+    await pendingFeed;
+
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', content: expect.objectContaining({ title: 'Titulo atual durante resolve' }),
+    }));
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+  });
+
+  test('reapplies changes made while the resolved Feed renderer is loading before ready', async () => {
+    let finishFeedRenderer;
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    harness.legacyBridge.selectRenderer.mockImplementation(({ activeFormat }) => {
+      if (activeFormat !== 'feed') return Promise.resolve();
+      return new Promise(resolve => { finishFeedRenderer = resolve; });
+    });
+    await harness.controller.initialize();
+
+    const pendingFeed = harness.controller.selectFormat('feed');
+    await Promise.resolve();
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+    for (const [index, value] of [[0, '1.4'], [1, '20'], [2, '75']]) {
+      harness.adjustmentInputs[index].value = value;
+      await harness.adjustmentInputs[index].dispatch('input');
+    }
+    harness.controller.selectTheme('navy');
+    expect(harness.elements.status.statusText.textContent).toBe('Atualizando preview');
+
+    finishFeedRenderer();
+    await pendingFeed;
+
+    expect(harness.legacyBridge.applyPublicationContent).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', theme: 'navy', imageAdjustments: { zoom: 1.4, x: 20, y: 75 },
+    }));
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('late Feed adjustment sync cannot touch ready Story', async () => {
+    let finishFeedSync; let runtimeFormat = null;
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    harness.legacyBridge.selectRenderer.mockImplementation(({ activeFormat }) => {
+      runtimeFormat = activeFormat;
+      return Promise.resolve();
+    });
+    await harness.controller.initialize();
+    await harness.controller.selectFormat('feed');
+    harness.legacyBridge.applyPublicationContent.mockImplementationOnce(({ assertCurrent }) => (
+      new Promise(resolve => {
+        finishFeedSync = () => {
+          try { assertCurrent(); runtimeFormat = 'feed-adjustment'; } catch (_error) {}
+          resolve();
+        };
+      })
+    ));
+
+    harness.adjustmentInputs[0].value = '1.4';
+    await harness.adjustmentInputs[0].dispatch('input');
+    const pendingStory = harness.controller.selectFormat('story');
+    await pendingStory;
+    expect(runtimeFormat).toBe('story');
+    finishFeedSync();
+    await Promise.resolve(); await Promise.resolve();
+
+    expect(harness.controller.getActiveFormat()).toBe('story');
+    expect(runtimeFormat).toBe('story');
+    expect(harness.adjustmentInputs[0].value).toBe('1');
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+  });
+
+  test('imports with Feed active and shares content with Story without resolving again', async () => {
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    await harness.controller.selectFormat('feed');
+    const storyBefore = { ...harness.controller.getPublication().formats.story };
+    const resolveCalls = harness.api.resolveEditorRenderer.mock.calls.length;
+    harness.fields[0].value = 'https://example.com/feed-news';
+    await harness.fields[0].dispatch('input');
+    await harness.controller.importNews();
+
+    expect(harness.controller.getActiveFormat()).toBe('feed');
+    expect(harness.controller.getPublication().content).toMatchObject({
+      title: 'Imported title', subtitle: 'Imported subtitle', tag: 'Imported tag', image: 'image-data',
+    });
+    expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(resolveCalls);
+    expect(harness.legacyBridge.applyPublicationContent).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', content: expect.objectContaining({ title: 'Imported title' }),
+    }));
+
+    await harness.controller.selectFormat('story');
+    expect(harness.controller.getPublication().content.title).toBe('Imported title');
+    expect(harness.controller.getPublication().formats.story).toMatchObject(storyBefore);
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'story', content: expect.objectContaining({ title: 'Imported title' }),
+    }));
+  });
+
+  test('late Feed resolution cannot replace Story after a rapid format switch', async () => {
+    let resolveFeed;
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.api.resolveEditorRenderer.mockImplementation(selection => {
+      if (selection.format === 'feed') return new Promise(resolve => { resolveFeed = resolve; });
+      return Promise.resolve({ template: 'renderer-z', page: 'index', dimensions: { width: 1080, height: 1920 }, themes: [] });
+    });
+
+    const pendingFeed = harness.controller.selectFormat('feed');
+    const pendingStory = harness.controller.selectFormat('story');
+    await pendingStory;
+    resolveFeed({ template: 'renderer-feed', page: 'index', dimensions: { width: 1080, height: 1350 }, themes: [] });
+    await pendingFeed;
+
+    expect(harness.controller.getActiveFormat()).toBe('story');
+    expect(harness.controller.getRenderer().template).toBe('renderer-z');
+    expect(harness.elements.previewViewport.style.aspectRatio).toBe('1080 / 1920');
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+  });
+
+  test('does not render Story as Feed when the current family has no Feed', async () => {
+    const harness = setup();
+    await harness.controller.initialize();
+    await harness.controller.selectFamily('family-two');
+    await harness.controller.selectFormat('feed');
+    expect(harness.controller.getActiveFormat()).toBe('feed');
+    expect(harness.controller.getRenderer()).toBeNull();
+    expect(harness.controller.getPreviewState()).toBe('error');
+    expect(harness.legacyBridge.clearPreview).toHaveBeenCalledTimes(1);
+    expect(harness.elements.status.statusText.textContent)
+      .toBe('Feed não disponível para esta configuração');
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
   });
 });

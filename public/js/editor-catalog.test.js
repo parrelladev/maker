@@ -19,6 +19,13 @@ describe('helpers do catálogo editorial no frontend', () => {
       .toEqual(['brand-x', 'family-y', 'variant-a', 'green']);
   });
 
+  test('escolhe defaults independentes por formato sem hardcode de variant', () => {
+    const story = Catalog.chooseDefault(catalog, 'story');
+    const feed = Catalog.chooseDefault(catalog, 'feed');
+    expect(story.variant.id).toBe('variant-a');
+    expect(feed.variant.id).toBe('feed-only');
+  });
+
   test('filtra variantes por metadata de formato e devolve seus temas', () => {
     const family = Catalog.findFamily(Catalog.findBrand(catalog, 'brand-x'), 'family-y');
     expect(Catalog.getVariants(family, 'story').map(item => item.id)).toEqual(['variant-a', 'variant-z']);

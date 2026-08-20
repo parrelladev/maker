@@ -140,12 +140,18 @@ function resizePreviewFrame() {
   const availableHeight = container?.clientHeight;
   if (!availableWidth) return;
 
-  const widthScale = availableWidth / 1080;
-  const heightScale = availableHeight ? availableHeight / 1920 : widthScale;
+  const dimensions = currentManifestData?.manifest?.dimensions || { width: 1080, height: 1920 };
+  const renderWidth = Number(dimensions.width) || 1080;
+  const renderHeight = Number(dimensions.height) || 1920;
+  previewFrame.style.width = `${renderWidth}px`;
+  previewFrame.style.height = `${renderHeight}px`;
+  wrapper.style.aspectRatio = `${renderWidth} / ${renderHeight}`;
+  const widthScale = availableWidth / renderWidth;
+  const heightScale = availableHeight ? availableHeight / renderHeight : widthScale;
   const scale = Math.min(widthScale, heightScale);
 
-  wrapper.style.width = `${1080 * scale}px`;
-  wrapper.style.height = `${1920 * scale}px`;
+  wrapper.style.width = `${renderWidth * scale}px`;
+  wrapper.style.height = `${renderHeight * scale}px`;
   previewFrame.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
@@ -360,6 +366,7 @@ async function ensurePreviewInitialized({
     currentManifestData = manifestData;
     previewInitializedTemplate = template;
     previewInitializedPage = page;
+    resizePreviewFrame();
 
     if (previewPlaceholder) {
       previewPlaceholder.style.display = 'none';
@@ -528,13 +535,21 @@ window.LegacyEditorBridge = {
   },
 
   async applyPublicationContent({
-    content, imageAdjustments = currentImageAdjustments, importedImage = null, assertCurrent = null
+    content,
+    theme = currentTheme,
+    activeFormat = currentFormat,
+    imageAdjustments = currentImageAdjustments,
+    importedImage = null,
+    assertCurrent = null
   }) {
     if (assertCurrent) assertCurrent();
+    currentTheme = theme || null;
+    currentFormat = activeFormat || null;
+    if (customTheme) customTheme.value = currentTheme || '';
     if (importedImage) {
       setExtractedImageFieldValue(importedImage.value, importedImage.url);
     }
-    await updatePreview(null, assertCurrent, content, imageAdjustments);
+    await updatePreview(null, assertCurrent, content, imageAdjustments, activeFormat);
     if (assertCurrent) assertCurrent();
     currentImageAdjustments = { ...imageAdjustments };
   },
@@ -571,25 +586,40 @@ window.LegacyEditorBridge = {
     renderer,
     activeFormat = null,
     theme,
+    content = null,
     imageAdjustments = currentImageAdjustments,
     assertCurrent
   }) {
     if (assertCurrent) assertCurrent();
     selectRendererState(renderer, theme, activeFormat);
-    await updatePreview(null, assertCurrent, null, imageAdjustments, activeFormat);
+    await updatePreview(null, assertCurrent, content, imageAdjustments, activeFormat);
     if (assertCurrent) assertCurrent();
     currentImageAdjustments = { ...imageAdjustments };
-  },
-
-  selectTheme(theme) {
-    currentTheme = theme || null;
-    if (customTheme) customTheme.value = currentTheme || '';
-    requestBestEffortPreviewUpdate();
   },
 
   setEditorPreviewReady(ready) {
     editorPreviewReady = ready;
     setGenerateDisabled('editor-preview', !ready);
+  },
+
+  resizePreview: resizePreviewFrame,
+
+  clearPreview() {
+    editorSessionVersion += 1;
+    currentTemplate = null;
+    currentPage = DEFAULT_PAGE;
+    currentFormat = null;
+    currentManifestData = null;
+    previewInitializedTemplate = null;
+    previewInitializedPage = null;
+    previewInitializationVersion += 1;
+    const frameDoc = previewFrame?.contentDocument;
+    if (frameDoc) {
+      frameDoc.open();
+      frameDoc.write('<!doctype html><html><body></body></html>');
+      frameDoc.close();
+    }
+    if (previewPlaceholder) previewPlaceholder.style.display = '';
   }
 };
 

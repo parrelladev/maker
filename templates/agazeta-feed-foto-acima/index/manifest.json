@@ -1,0 +1,33 @@
+{
+  "name": "A Gazeta - Foto acima - Feed",
+  "editor": {
+    "brand": "agazeta",
+    "family": "padrao",
+    "variant": "foto-acima",
+    "label": "Foto acima"
+  },
+  "formats": {
+    "feed": {
+      "dimensions": { "width": 1080, "height": 1350 },
+      "capabilities": { "imageAdjustments": { "zoom": true, "position": true } }
+    }
+  },
+  "themes": [
+    { "id": "azul", "label": "Azul" }
+  ],
+  "brandAssets": {
+    "logo": "primary",
+    "fonts": []
+  },
+  "logoField": "logo",
+  "bindings": [
+    { "selector": "#bg", "type": "image", "field": "resolvedBg", "required": true },
+    { "selector": "#logo", "type": "logo", "field": "resolvedLogo", "required": true },
+    { "selector": "#title", "type": "text", "field": "h1" },
+    { "selector": "#subtitle", "type": "text", "field": "h2" },
+    { "selector": "#tag", "type": "text", "field": "tag" }
+  ],
+  "cssVars": [],
+  "classes": [],
+  "attributes": []
+}

@@ -195,6 +195,8 @@ function createHarness({ autoResolveRuntime = true } = {}) {
     return JSON.parse(run(`JSON.stringify({
       currentTemplate,
       currentTheme,
+      currentFormat,
+      currentImageAdjustments,
       lastNewsUrl,
       lastNewsData,
       currentManifestData,
@@ -214,6 +216,64 @@ function createHarness({ autoResolveRuntime = true } = {}) {
     state
   };
 }
+
+describe('exportação do formato editorial visível', () => {
+  test('exporta Feed 1080x1350 e depois Story 1080x1920 sem estado residual', async () => {
+    const harness = createHarness();
+    const updatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({
+      chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==',
+    });
+    harness.loadManifest.mockImplementation((template, page) => Promise.resolve({
+      template, page,
+      manifest: {
+        dimensions: template === 'renderer-feed'
+          ? { width: 1080, height: 1350 }
+          : { width: 1080, height: 1920 },
+      },
+      css: [], html: '',
+    }));
+
+    harness.run(`
+      selectRendererState({ template: 'renderer-feed', page: 'index', themes: [{ id: 'azul', label: 'Azul' }] }, 'azul', 'feed');
+      currentImageAdjustments = { zoom: 1.3, x: 30, y: 70 };
+    `);
+    await harness.run('generateArtWithPreviewFlow()');
+
+    const feedManifest = harness.context.PreviewExport.downloadPreview.mock.calls[0][1];
+    expect(harness.context.PreviewExport.downloadPreview.mock.calls[0][0])
+      .toBe(harness.elements.previewFrame);
+    expect(feedManifest.manifest.dimensions).toEqual({ width: 1080, height: 1350 });
+    expect(updatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'feed', imageAdjustments: { zoom: 1.3, x: 30, y: 70 },
+    }));
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'renderer-feed', currentFormat: 'feed',
+      currentImageAdjustments: { zoom: 1.3, x: 30, y: 70 },
+    });
+
+    harness.run(`
+      selectRendererState({ template: 'renderer-story', page: 'index', themes: [{ id: 'preto', label: 'Preto' }] }, 'preto', 'story');
+      currentImageAdjustments = { zoom: 1.1, x: 45, y: 55 };
+    `);
+    await harness.run('generateArtWithPreviewFlow()');
+
+    const storyManifest = harness.context.PreviewExport.downloadPreview.mock.calls[1][1];
+    expect(harness.context.PreviewExport.downloadPreview.mock.calls[1][0])
+      .toBe(harness.elements.previewFrame);
+    expect(storyManifest.manifest.dimensions).toEqual({ width: 1080, height: 1920 });
+    expect(updatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
+      activeFormat: 'story', imageAdjustments: { zoom: 1.1, x: 45, y: 55 },
+    }));
+    expect(harness.state()).toMatchObject({
+      currentTemplate: 'renderer-story', currentFormat: 'story', currentTheme: 'preto',
+      currentImageAdjustments: { zoom: 1.1, x: 45, y: 55 },
+    });
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(2);
+  });
+});
 
 async function createBindingRuntimeHarness(
   manifest,

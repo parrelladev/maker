@@ -3,7 +3,7 @@
   if (typeof module === 'object' && module.exports) module.exports = editorUi;
   else global.EditorUi = editorUi;
 })(typeof window !== 'undefined' ? window : globalThis, function createEditorUiModule() {
-  const ACTIVE_FORMAT = 'story';
+  const INITIAL_FORMAT = 'story';
 
   function createEditorController({ document, api, state, catalogHelpers, frontendUtils, legacyBridge = null }) {
     let catalog = null;
@@ -13,6 +13,7 @@
     let previewState = 'idle';
     let latestNewsImportId = 0;
     let latestContentSyncId = 0;
+    let activeFormat = INITIAL_FORMAT;
 
     const controls = {
       brand: document.querySelector('[data-control="brand"]'),
@@ -24,6 +25,8 @@
       importNews: document.querySelector('[data-action="import-news"]'),
       imageAdjustments: document.querySelector('[data-control="image-adjustments"]'),
       resetImageAdjustments: document.querySelector('[data-action="reset-image-adjustments"]'),
+      previewViewport: document.querySelector('[data-preview-viewport]'),
+      previewFrame: document.querySelector('#previewFrame'),
     };
 
     function setStatus(message) {
@@ -57,8 +60,8 @@
       return { id: ++latestNewsImportId, url };
     }
 
-    function assertContentSyncCurrent(syncId, assertCurrent = null) {
-      if (syncId !== latestContentSyncId) {
+    function assertContentSyncCurrent(syncId, format, assertCurrent = null) {
+      if (syncId !== latestContentSyncId || format !== activeFormat) {
         const error = new Error('SincronizaÃ§Ã£o de conteÃºdo obsoleta');
         error.code = 'OPERATION_STALE';
         throw error;
@@ -72,23 +75,27 @@
       pendingStatus = 'Atualizando preview',
       readyStatus = 'Pronto',
     } = {}) {
+      if (previewState !== 'ready') return false;
       const syncId = ++latestContentSyncId;
       const content = { ...publication.content };
-      const imageAdjustments = { ...publication.formats[ACTIVE_FORMAT].imageAdjustments };
-      const assertSyncCurrent = () => assertContentSyncCurrent(syncId, assertCurrent);
+      const format = activeFormat;
+      const theme = publication.formats[format].theme;
+      const imageAdjustments = { ...publication.formats[format].imageAdjustments };
+      const assertSyncCurrent = () => assertContentSyncCurrent(syncId, format, assertCurrent);
       legacyBridge?.setContentSyncPending?.(true);
       if (pendingStatus) setStatus(pendingStatus);
 
       try {
         await legacyBridge.applyPublicationContent({
-          content, imageAdjustments, importedImage, assertCurrent: assertSyncCurrent
+          content, theme, activeFormat: format, imageAdjustments, importedImage,
+          assertCurrent: assertSyncCurrent
         });
         assertSyncCurrent();
         legacyBridge?.setContentSyncPending?.(false);
         if (readyStatus) setStatus(readyStatus);
         return true;
       } catch (error) {
-        if (syncId !== latestContentSyncId || error?.code === 'OPERATION_STALE') return false;
+        if (syncId !== latestContentSyncId || format !== activeFormat || error?.code === 'OPERATION_STALE') return false;
         setStatus('Preview nÃ£o pÃ´de ser atualizado');
         throw error;
       }
@@ -172,16 +179,16 @@
     function applySelection(selection) {
       publication = state.setBrand(publication, selection.brand.id);
       publication = state.setFamily(publication, selection.family.id);
-      publication = state.setFormatVariant(publication, ACTIVE_FORMAT, selection.variant.id);
-      publication = state.setFormatTheme(publication, ACTIVE_FORMAT, selection.theme?.id || null);
+      publication = state.setFormatVariant(publication, activeFormat, selection.variant.id);
+      publication = state.setFormatTheme(publication, activeFormat, selection.theme?.id || null);
     }
 
     function currentNodes() {
       const brand = catalogHelpers.findBrand(catalog, publication.brand);
       const family = catalogHelpers.findFamily(brand, publication.family);
-      const variant = catalogHelpers.getVariants(family, ACTIVE_FORMAT)
-        .find(candidate => candidate.id === publication.formats.story.variant) || null;
-      return { brand, family, variant, format: catalogHelpers.getFormat(variant, ACTIVE_FORMAT) };
+      const variant = catalogHelpers.getVariants(family, activeFormat)
+        .find(candidate => candidate.id === publication.formats[activeFormat].variant) || null;
+      return { brand, family, variant, format: catalogHelpers.getFormat(variant, activeFormat) };
     }
 
     function fillSelect(select, entries, value, labelKey) {
@@ -219,19 +226,40 @@
       fillSelect(controls.family, brand?.families || [], publication.family, 'label');
       renderButtons(
         controls.variants,
-        catalogHelpers.getVariants(family, ACTIVE_FORMAT),
-        publication.formats.story.variant,
+        catalogHelpers.getVariants(family, activeFormat),
+        publication.formats[activeFormat].variant,
         'variantId',
         selectVariant
       );
       renderButtons(
         controls.themes,
         format?.themes || [],
-        publication.formats.story.theme,
+        publication.formats[activeFormat].theme,
         'themeId',
         selectTheme
       );
       renderImageAdjustments(format?.capabilities);
+      document.querySelectorAll('[data-view-mode]').forEach(button => {
+        const selected = button.dataset.viewMode === activeFormat;
+        button.setAttribute('aria-pressed', String(selected));
+        button.classList.toggle?.('is-active', selected);
+      });
+    }
+
+    function formatLabel(format) {
+      return format === 'story' ? 'Story' : format === 'feed' ? 'Feed' : format;
+    }
+
+    function updatePreviewDimensions(dimensions) {
+      const width = Number(dimensions?.width);
+      const height = Number(dimensions?.height);
+      if (!width || !height) return;
+      if (controls.previewViewport) controls.previewViewport.style.aspectRatio = `${width} / ${height}`;
+      if (controls.previewFrame) {
+        controls.previewFrame.style.width = `${width}px`;
+        controls.previewFrame.style.height = `${height}px`;
+      }
+      legacyBridge?.resizePreview?.();
     }
 
     function renderImageAdjustments(capabilities = {}) {
@@ -241,7 +269,7 @@
       document.querySelectorAll('[data-image-adjustment]').forEach(input => {
         const key = input.dataset.imageAdjustment;
         input.disabled = !(key === 'zoom' ? supported.zoom === true : supported.position === true);
-        input.value = String(publication.formats[ACTIVE_FORMAT].imageAdjustments[key]);
+        input.value = String(publication.formats[activeFormat].imageAdjustments[key]);
         const output = document.querySelector(`[data-value-for="${key}"]`);
         if (output) output.value = input.value;
       });
@@ -250,50 +278,97 @@
 
     function updateImageAdjustment(input) {
       publication = state.setImageAdjustment(
-        publication, ACTIVE_FORMAT, input.dataset.imageAdjustment, Number(input.value)
+        publication, activeFormat, input.dataset.imageAdjustment, Number(input.value)
       );
       renderImageAdjustments(currentNodes().format?.capabilities);
+      if (previewState !== 'ready') return;
       syncPublicationContentToPreview().catch(error => {
         if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar enquadramento:', error);
       });
     }
 
     function resetCurrentImageAdjustments() {
-      publication = state.resetImageAdjustments(publication, ACTIVE_FORMAT);
+      publication = state.resetImageAdjustments(publication, activeFormat);
       renderImageAdjustments(currentNodes().format?.capabilities);
+      if (previewState !== 'ready') return Promise.resolve(false);
       return syncPublicationContentToPreview();
+    }
+
+    function isStructuralSelectionCurrent(selection, requestId) {
+      return requestId === latestRendererRequest
+        && selection.format === activeFormat
+        && selection.brand === publication.brand
+        && selection.family === publication.family
+        && selection.variant === publication.formats[selection.format].variant;
+    }
+
+    function assertStructuralSelectionCurrent(selection, requestId) {
+      if (isStructuralSelectionCurrent(selection, requestId)) return;
+      const error = new Error('Renderer obsoleto');
+      error.code = 'OPERATION_STALE';
+      throw error;
+    }
+
+    function readPublicationSnapshot(format) {
+      return {
+        activeFormat: format,
+        theme: publication.formats[format].theme,
+        imageAdjustments: { ...publication.formats[format].imageAdjustments },
+        content: { ...publication.content },
+      };
+    }
+
+    function samePublicationSnapshot(left, right) {
+      return left.activeFormat === right.activeFormat
+        && left.theme === right.theme
+        && Object.keys(left.imageAdjustments).every(key => (
+          left.imageAdjustments[key] === right.imageAdjustments[key]
+        ))
+        && Object.keys(left.content).every(key => left.content[key] === right.content[key]);
+    }
+
+    async function applyCurrentSnapshotUntilStable(selection, requestId, initialSnapshot) {
+      let appliedSnapshot = initialSnapshot;
+      while (true) {
+        assertStructuralSelectionCurrent(selection, requestId);
+        const currentSnapshot = readPublicationSnapshot(selection.format);
+        if (samePublicationSnapshot(appliedSnapshot, currentSnapshot)) return;
+        await legacyBridge.applyPublicationContent({
+          ...currentSnapshot,
+          assertCurrent: () => assertStructuralSelectionCurrent(selection, requestId),
+        });
+        appliedSnapshot = currentSnapshot;
+      }
     }
 
     async function resolvePreview() {
       const requestId = ++latestRendererRequest;
+      const format = activeFormat;
       const selection = {
         brand: publication.brand,
         family: publication.family,
-        variant: publication.formats.story.variant,
-        format: ACTIVE_FORMAT,
+        variant: publication.formats[format].variant,
+        format,
       };
       setPreviewState('loading');
+      legacyBridge?.setContentSyncPending?.(true);
       setStatus('Atualizando preview');
       try {
         const resolved = await api.resolveEditorRenderer(selection);
-        if (requestId !== latestRendererRequest) return;
+        assertStructuralSelectionCurrent(selection, requestId);
         renderer = resolved;
+        updatePreviewDimensions(resolved.dimensions);
         if (legacyBridge) {
+          const snapshot = readPublicationSnapshot(format);
           await legacyBridge.selectRenderer({
             renderer: resolved,
-            activeFormat: ACTIVE_FORMAT,
-            theme: publication.formats.story.theme,
-            imageAdjustments: { ...publication.formats.story.imageAdjustments },
-            assertCurrent: () => {
-              if (requestId !== latestRendererRequest) {
-                const error = new Error('Renderer obsoleto');
-                error.code = 'OPERATION_STALE';
-                throw error;
-              }
-            },
+            ...snapshot,
+            assertCurrent: () => assertStructuralSelectionCurrent(selection, requestId),
           });
+          await applyCurrentSnapshotUntilStable(selection, requestId, snapshot);
         }
-        if (requestId === latestRendererRequest) {
+        if (isStructuralSelectionCurrent(selection, requestId)) {
+          legacyBridge?.setContentSyncPending?.(false);
           setPreviewState('ready');
           setStatus('Pronto');
         }
@@ -305,14 +380,40 @@
       }
     }
 
+    async function selectFormat(format) {
+      if (format !== 'story' && format !== 'feed') return;
+      if (format === activeFormat && previewState === 'ready') return;
+      latestContentSyncId += 1;
+      activeFormat = format;
+      const brand = catalogHelpers.findBrand(catalog, publication.brand);
+      const family = catalogHelpers.findFamily(brand, publication.family);
+      const variant = catalogHelpers.getVariants(family, format)
+        .find(candidate => candidate.id === publication.formats[format].variant);
+      if (!variant) {
+        const selection = catalogHelpers.chooseForFamily(catalog, publication.brand, publication.family, format);
+        if (!selection) {
+          latestRendererRequest += 1;
+          renderer = null;
+          setPreviewState('error');
+          legacyBridge?.clearPreview?.();
+          render();
+          setStatus(`${formatLabel(format)} não disponível para esta configuração`);
+          return;
+        }
+        applySelection(selection);
+      }
+      render();
+      await resolvePreview();
+    }
+
     async function selectVariant(variantId) {
       const { family } = currentNodes();
-      const variant = catalogHelpers.getVariants(family, ACTIVE_FORMAT)
+      const variant = catalogHelpers.getVariants(family, activeFormat)
         .find(candidate => candidate.id === variantId);
       if (!variant) return;
-      const theme = catalogHelpers.getFormat(variant, ACTIVE_FORMAT)?.themes?.[0] || null;
-      publication = state.setFormatVariant(publication, ACTIVE_FORMAT, variant.id);
-      publication = state.setFormatTheme(publication, ACTIVE_FORMAT, theme?.id || null);
+      const theme = catalogHelpers.getFormat(variant, activeFormat)?.themes?.[0] || null;
+      publication = state.setFormatVariant(publication, activeFormat, variant.id);
+      publication = state.setFormatTheme(publication, activeFormat, theme?.id || null);
       render();
       await resolvePreview();
     }
@@ -320,17 +421,20 @@
     function selectTheme(themeId) {
       const { format } = currentNodes();
       if (!(format?.themes || []).some(theme => theme.id === themeId)) return;
-      publication = state.setFormatTheme(publication, ACTIVE_FORMAT, themeId);
+      publication = state.setFormatTheme(publication, activeFormat, themeId);
       render();
-      legacyBridge?.selectTheme(themeId);
-      if (previewState === 'ready') setStatus('Pronto');
+      if (previewState !== 'ready') return Promise.resolve(false);
+      return syncPublicationContentToPreview().catch(error => {
+        if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar tema:', error);
+        return false;
+      });
     }
 
     async function selectBrand(brandId) {
-      const selection = catalogHelpers.chooseForBrand(catalog, brandId, ACTIVE_FORMAT);
+      const selection = catalogHelpers.chooseForBrand(catalog, brandId, activeFormat);
       if (!selection) {
         render();
-        setStatus('Nenhuma variante Story disponível');
+        setStatus(`${formatLabel(activeFormat)} não disponível para esta configuração`);
         return;
       }
       applySelection(selection);
@@ -339,10 +443,10 @@
     }
 
     async function selectFamily(familyId) {
-      const selection = catalogHelpers.chooseForFamily(catalog, publication.brand, familyId, ACTIVE_FORMAT);
+      const selection = catalogHelpers.chooseForFamily(catalog, publication.brand, familyId, activeFormat);
       if (!selection) {
         render();
-        setStatus('Nenhuma variante Story disponível');
+        setStatus(`${formatLabel(activeFormat)} não disponível para esta configuração`);
         return;
       }
       applySelection(selection);
@@ -362,6 +466,7 @@
             legacyBridge?.setNewsImportPending?.(false);
           }
           reconcilePublicationContent(field.dataset.field);
+          if (previewState !== 'ready') return;
           syncPublicationContentToPreview().catch(error => {
             if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar conteÃºdo:', error);
           });
@@ -375,8 +480,10 @@
         .forEach(input => input.addEventListener('input', () => updateImageAdjustment(input)));
       controls.resetImageAdjustments?.addEventListener('click', resetCurrentImageAdjustments);
       document.querySelector('[data-action="new-artwork"]')?.addEventListener('click', () => reset());
-      document.querySelectorAll('[data-view-mode="feed"], [data-view-mode="compare"]')
-        .forEach(button => button.addEventListener('click', () => setStatus('Em breve')));
+      document.querySelectorAll('[data-view-mode="feed"], [data-view-mode="story"]')
+        .forEach(button => button.addEventListener('click', () => selectFormat(button.dataset.viewMode)));
+      document.querySelector('[data-view-mode="compare"]')
+        ?.addEventListener('click', () => setStatus('Em breve'));
     }
 
     async function reset() {
@@ -385,9 +492,10 @@
       latestContentSyncId += 1;
       legacyBridge?.setNewsImportPending?.(false);
       legacyBridge?.setContentSyncPending?.(true);
+      activeFormat = INITIAL_FORMAT;
       publication = state.createPublication();
       document.querySelectorAll('[data-field]').forEach(field => { field.value = ''; });
-      const selection = catalogHelpers.chooseDefault(catalog, ACTIVE_FORMAT);
+      const selection = catalogHelpers.chooseDefault(catalog, activeFormat);
       if (!selection) {
         render();
         setStatus('Nenhuma variante Story disponível');
@@ -409,7 +517,7 @@
         setStatus('Catálogo indisponível');
         return;
       }
-      if (!catalogHelpers.chooseDefault(catalog, ACTIVE_FORMAT)) {
+      if (!catalogHelpers.chooseDefault(catalog, activeFormat)) {
         render();
         setStatus('Nenhuma variante Story disponível');
         return;
@@ -426,13 +534,15 @@
       selectFamily,
       selectTheme,
       selectVariant,
+      selectFormat,
       resetCurrentImageAdjustments,
       getPublication: () => publication,
       getRenderer: () => renderer,
       getPreviewState: () => previewState,
       getContentSyncId: () => latestContentSyncId,
+      getActiveFormat: () => activeFormat,
     };
   }
 
-  return { ACTIVE_FORMAT, createEditorController };
+  return { INITIAL_FORMAT, createEditorController };
 });

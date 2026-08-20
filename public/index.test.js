@@ -30,6 +30,8 @@ describe('shell do editor', () => {
 
   test('marca Story como modo inicial', () => {
     expect($('button[data-view-mode="story"]').attr('aria-pressed')).toBe('true');
+    expect($('button[data-view-mode="feed"]').attr('disabled')).toBeUndefined();
+    expect($('button[data-view-mode="compare"][disabled]')).toHaveLength(1);
   });
 
   test.each([
