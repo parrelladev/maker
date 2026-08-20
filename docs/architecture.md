@@ -12,9 +12,9 @@ proporções, embora Story permaneça o único modo funcional nesta etapa.
 O modal deixou de ser a arquitetura principal. IDs ainda consumidos por
 `public/script.js` foram preservados no shell para uma transição incremental,
 assim como containers legados de catálogo isolados e não visíveis. Os controles
-de marca, família, variante e tema são apenas estruturas vazias nesta fase:
-integração com `publication`, Brand Registry e `editorCatalog`, assim como Feed,
-Comparar e Baixar ambos, permanece para as próximas etapas.
+de marca, família, variante e tema são preenchidos declarativamente pelo
+catálogo editorial público. Story é o primeiro formato operacional integrado;
+Feed, Comparar e Baixar ambos permanecem visíveis, mas não estão implementados.
 
 Este documento descreve a arquitetura observada no código atual. Ele registra o
 comportamento existente; não define uma arquitetura-alvo.
@@ -29,8 +29,11 @@ ajustes de imagem.
 
 Estado transitório da interface, como formato aberto, sidebar, loading, toast,
 iframe ou identidade de operações assíncronas, não pertence a `publication`.
-O módulo é uma fundação de domínio sem dependência de DOM, templates ou
-marcas específicas e ainda não está integrado à interface existente.
+O módulo continua sem dependência de DOM, templates ou marcas específicas e
+agora é a fonte de verdade editorial do shell. `editor-ui.js` cria uma
+`publication`, deriva do catálogo a primeira combinação Story válida e aplica
+as trocas de marca, família, variante, tema e campos de conteúdo por meio das
+funções de `editor-state.js`.
 
 ## Registry de marcas (fundacional)
 
@@ -112,6 +115,32 @@ todos ordenados deterministicamente por ID. A referência técnica relativa
 `resolveRenderer()` com seleção exata de marca, família, variante e formato;
 tema não escolhe renderer e não há fallback para a primeira opção. Nenhum path
 absoluto ou raiz do filesystem faz parte da representação serializável.
+
+O navegador obtém essa representação em `GET /api/editor/catalog`. A referência
+técnica permanece no índice privado: `POST /api/editor/resolve` recebe marca,
+família, variante e formato, chama `resolveRenderer()` e devolve somente
+`template`, `page`, dimensões e temas. Trocas de tema não usam essa rota porque
+tema não participa da chave do renderer.
+
+`public/js/editor-catalog.js` contém apenas helpers puros de navegação e seleção
+válida; descoberta, conflitos e resolução técnica continuam exclusivamente no
+backend. `public/js/editor-ui.js` renderiza selects e botões acessíveis a partir
+dos dados recebidos e usa um identificador monotônico para descartar resoluções
+ou inicializações de preview obsoletas. O controller também mantém o estado
+transitório `idle/loading/ready/error`: mudanças de renderer bloqueiam a
+exportação antes da primeira espera assíncrona e somente a liberam depois que a
+ponte legada conclui a atualização efetiva do iframe para a seleção atual.
+
+### Ponte temporária com o editor legado
+
+O objeto `LegacyEditorBridge`, definido em `public/script.js`, concentra a
+compatibilidade entre a seleção editorial resolvida e
+`currentTemplate`/`currentPage`/`currentTheme`. O controller novo entrega o
+renderer a essa ponte, que reutiliza o iframe, o runtime de bindings e a
+exportação existentes. O select oculto `#customTheme` também é sincronizado
+somente nessa fronteira; a interação do usuário ocorre nos botões de tema do
+novo shell. Essa ponte é transitória e não torna o script legado fonte de
+verdade editorial.
 
 No schema atual, `themes` pertence ao renderer como um todo. Assim, todos os
 formatos declarados pelo mesmo manifest compartilham o mesmo conjunto de temas;

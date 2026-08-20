@@ -7,6 +7,7 @@ const {
 
 const templatesRouter = require('./routes/templates');
 const newsRouter = require('./routes/news');
+const editorRouter = require('./routes/editor');
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use('/templates', express.static('templates'));
 
 app.use('/api/templates', templatesRouter);
 app.use('/api/news', newsRouter);
+app.use('/api/editor', editorRouter);
 
 app.get('/', (req, res) => {
   res.json({

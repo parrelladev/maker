@@ -776,6 +776,44 @@ describe('runtime de bindings carregado por public/script.js', () => {
   });
 });
 
+describe('readiness editorial e exportação legada', () => {
+  test('guarda de profundidade impede download enquanto o preview editorial não está pronto', async () => {
+    const harness = createHarness();
+    harness.run('window.LegacyEditorBridge.setEditorPreviewReady(false)');
+
+    await harness.run('generateArtWithPreviewFlow()');
+
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('Aguarde o preview ficar pronto para baixar');
+  });
+
+  test('razões independentes não reabilitam o botão enquanto outra operação o bloqueia', () => {
+    const harness = createHarness();
+
+    harness.run(`
+      window.LegacyEditorBridge.setEditorPreviewReady(false);
+      showLoading();
+      window.LegacyEditorBridge.setEditorPreviewReady(true);
+    `);
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+
+    harness.run('hideLoading()');
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+
+    harness.run(`
+      showLoading();
+      window.LegacyEditorBridge.setEditorPreviewReady(false);
+      hideLoading();
+    `);
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+
+    harness.run('window.LegacyEditorBridge.setEditorPreviewReady(true)');
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+});
+
 describe('contrato de estado de public/script.js', () => {
   test('inicialização oculta apenas o controle legado e preserva as opções visuais de tema', () => {
     const harness = createHarness();

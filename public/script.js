@@ -101,6 +101,7 @@ const DEFAULT_PAGE = 'index';
 const STALE_OPERATION_CODE = 'OPERATION_STALE';
 
 let currentTemplate = null;
+let currentPage = DEFAULT_PAGE;
 let currentTemplateMeta = null;
 let currentTheme = null;
 let activeStoryGroup = storyGroups[0] || null;
@@ -116,6 +117,8 @@ let modalSessionVersion = 0;
 let latestGenerationId = 0;
 let latestNewsFetchId = 0;
 let latestBestEffortPreviewUpdateId = 0;
+let editorPreviewReady = true;
+const generateDisableReasons = new Set();
 let resolvedImageFieldState = {
   source: null,
   value: null,
@@ -192,7 +195,7 @@ function createGenerationContext(formData) {
     formData: { ...formData },
     generationId: ++latestGenerationId,
     modalSessionVersion,
-    page: DEFAULT_PAGE,
+    page: currentPage,
     template: formData.template,
     url: formData.newsUrl
   };
@@ -202,7 +205,7 @@ function createNewsFetchContext(formData) {
   return {
     fetchId: ++latestNewsFetchId,
     modalSessionVersion,
-    page: DEFAULT_PAGE,
+    page: currentPage,
     template: formData.template,
     url: formData.newsUrl
   };
@@ -213,7 +216,7 @@ function isNewsFetchContextCurrent(context) {
     context.fetchId === latestNewsFetchId
     && context.modalSessionVersion === modalSessionVersion
     && context.template === currentTemplate
-    && context.page === DEFAULT_PAGE
+    && context.page === currentPage
     && context.url === normalizeOptionalValue(newsUrl.value)
   );
 }
@@ -231,7 +234,7 @@ function isGenerationContextCurrent(context) {
     context.generationId === latestGenerationId
     && context.modalSessionVersion === modalSessionVersion
     && context.template === currentTemplate
-    && context.page === DEFAULT_PAGE
+    && context.page === currentPage
     && context.url === normalizeOptionalValue(newsUrl.value)
   );
 }
@@ -466,6 +469,7 @@ function openModal(templateKey) {
   modalSessionVersion += 1;
   currentTemplateMeta = templateData || null;
   currentTemplate = templateData ? templateData.id : templateKey;
+  currentPage = DEFAULT_PAGE;
   lastNewsData = null;
   lastNewsUrl = null;
   currentManifestData = null;
@@ -530,6 +534,7 @@ function closeModalHandler() {
   modalSessionVersion += 1;
   modal.classList.remove('show');
   currentTemplate = null;
+  currentPage = DEFAULT_PAGE;
   currentTemplateMeta = null;
   currentTheme = null;
   lastNewsData = null;
@@ -652,7 +657,7 @@ async function handleFetchNewsAndPreview() {
 // Monta o HTML/CSS do template dentro do iframe de preview reaproveitando o manifest.
 async function ensurePreviewInitialized({
   template = currentTemplate,
-  page = DEFAULT_PAGE,
+  page = currentPage,
   manifestData: providedManifestData = null,
   assertCurrent = null
 } = {}) {
@@ -836,7 +841,7 @@ function isBestEffortPreviewContextCurrent(context) {
     context.updateId === latestBestEffortPreviewUpdateId
     && context.modalSessionVersion === modalSessionVersion
     && context.template === currentTemplate
-    && context.page === DEFAULT_PAGE
+    && context.page === currentPage
   );
 }
 
@@ -859,7 +864,7 @@ function requestBestEffortPreviewUpdate() {
     updateId: ++latestBestEffortPreviewUpdateId,
     modalSessionVersion,
     template: currentTemplate,
-    page: DEFAULT_PAGE
+    page: currentPage
   };
   const assertCurrent = () => assertBestEffortPreviewContextCurrent(context);
   updatePreview(null, assertCurrent)
@@ -886,8 +891,55 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null) {
   }
 }
 
+// Ponte temporária e única entre a seleção editorial e o estado do script legado.
+// O catálogo e a publication permanecem sob responsabilidade do novo controller.
+window.LegacyEditorBridge = {
+  async selectRenderer({ renderer, theme, assertCurrent }) {
+    if (assertCurrent) assertCurrent();
+    modalSessionVersion += 1;
+    currentTemplate = renderer.template;
+    currentPage = renderer.page || DEFAULT_PAGE;
+    currentTemplateMeta = {
+      id: renderer.template,
+      name: renderer.template,
+      themes: (renderer.themes || []).map(item => ({ id: item.id, name: item.label }))
+    };
+    currentTheme = theme || null;
+    currentManifestData = null;
+    previewInitializedTemplate = null;
+    previewInitializedPage = null;
+    previewInitializationVersion += 1;
+
+    if (customTheme) {
+      customTheme.innerHTML = (renderer.themes || [])
+        .map(item => `<option value="${item.id}">${item.label}</option>`)
+        .join('');
+      customTheme.value = currentTheme || '';
+    }
+    updateModalTitle();
+    await updatePreview(null, assertCurrent);
+  },
+
+  selectTheme(theme) {
+    currentTheme = theme || null;
+    if (customTheme) customTheme.value = currentTheme || '';
+    updateModalTitle();
+    requestBestEffortPreviewUpdate();
+  },
+
+  setEditorPreviewReady(ready) {
+    editorPreviewReady = ready;
+    setGenerateDisabled('editor-preview', !ready);
+  }
+};
+
 // Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
 async function generateArtWithPreviewFlow() {
+  if (!editorPreviewReady) {
+    showToast('Aguarde o preview ficar pronto para baixar', 'info');
+    return;
+  }
+
   const formData = readGenerationFormData();
 
   const inputValidation = validateGenerationInput(formData);
@@ -1013,12 +1065,21 @@ function applyGenerationValidation(validation) {
 
 function showLoading() {
   loadingOverlay.classList.add('show');
-  generateBtn.disabled = true;
+  setGenerateDisabled('export', true);
 }
 
 function hideLoading() {
   loadingOverlay.classList.remove('show');
-  generateBtn.disabled = false;
+  setGenerateDisabled('export', false);
+}
+
+function setGenerateDisabled(reason, disabled) {
+  if (disabled) {
+    generateDisableReasons.add(reason);
+  } else {
+    generateDisableReasons.delete(reason);
+  }
+  generateBtn.disabled = generateDisableReasons.size > 0;
 }
 
 function showToast(message, type = 'info') {

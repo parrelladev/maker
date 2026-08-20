@@ -38,6 +38,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .choice-group { min-width: 0; padding: 0; margin: 18px 0 0; border: 0; }
 .variant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .theme-options { display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; }
+.variant-grid button, .theme-options button { min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-weight: 600; }
+.variant-grid button.is-selected, .theme-options button.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, white); color: var(--accent); }
 .control-placeholder { grid-column: 1 / -1; margin: 0; padding: 10px 11px; border: 1px dashed var(--border-strong); border-radius: 7px; color: var(--muted); font-size: 12px; }
 .current-image { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 14px; }
 .current-image > span { display: grid; place-items: center; aspect-ratio: 1; border-radius: 7px; background: var(--stage); color: var(--muted); font-size: 10px; }
