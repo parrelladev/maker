@@ -205,13 +205,16 @@ Como o manifest vem do filesystem local, esse fluxo depende de alguém com
 capacidade de alterar conteúdo implantado. Ainda assim, o destino é externo e
 usa a rede do servidor.
 
-Os parâmetros `template` e `page` ainda não são confinados a `TEMPLATE_ROOT`.
-Parâmetros com separadores codificados podem alcançar caminhos fora da raiz e
-carregar manifests locais que não pertencem ao catálogo. Essa é uma
-**vulnerabilidade confirmada pelo código** e exige uma tarefa de segurança
-separada e prioritária para resolver, normalizar e validar o caminho final antes
-de qualquer leitura. A política limitada do cache de logos não corrige nem
-mitiga o acesso indevido ao filesystem.
+Os parâmetros `template` e `page` são confinados a `TEMPLATE_ROOT` por
+`manifestLoader`, antes de qualquer leitura. Ambos precisam ser segmentos
+diretos não vazios: `.`, `..`, NUL, `/`, `\` e formas absolutas são rejeitados.
+Depois dessa validação, `path.resolve` constrói o diretório e `path.relative`
+comprova que ele não é absoluto nem começa fora da raiz. A defesa fica na
+fronteira do filesystem e cobre a rota e outros chamadores de `loadManifest`.
+Referências inválidas usam o contrato público `404 TEMPLATE_NOT_FOUND`, sem
+expor o caminho resolvido. Testes unitários cobrem separadores POSIX e Windows,
+segmentos normalizáveis, valores absolutos e nomes Unicode; testes HTTP exercem
+`%2F`, `%5C` e `%2E%2E` contra um template válido colocado fora do catálogo.
 
 ## Requisições externas realizadas pelo servidor
 
@@ -500,9 +503,9 @@ Portanto:
 - **Defesa ausente:** validação de schema e allowlists.
 - **Defesa ausente:** isolamento do template em origem separada ou iframe
   restrito.
-- **Hipótese a testar:** parâmetros `:template` e `:page` com segmentos
-  codificados, traversal e diferenças de normalização entre Express, URL e
-  `path.join`. Não há teste de segurança desse contrato.
+- **Defesa existente:** parâmetros `:template` e `:page` aceitam somente nomes
+  diretos confinados a `TEMPLATE_ROOT`; a suíte testa segmentos codificados,
+  traversal, `/` e `\` após a decodificação do Express.
 
 Os arquivos estáticos são servidos pelo Express a partir de raízes definidas,
 mas o comportamento completo de normalização e symlinks depende da biblioteca,

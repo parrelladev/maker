@@ -172,6 +172,28 @@ describe('rotas de templates com fixtures mínimas', () => {
   });
 
   test.each([
+    '/api/templates/%2E%2E%2Foutside-template/valid',
+    '/api/templates/%2E%2E%5Coutside-template/valid',
+    '/api/templates/fixture/foo%2Fbar',
+    '/api/templates/fixture/foo%5Cbar',
+  ])('bloqueia traversal URL-encoded em %s', async (route) => {
+    await withTemplateServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}${route}`);
+      const body = await response.json();
+
+      expect(response.status).toBe(404);
+      expect(body).toEqual({
+        error: 'Template não encontrado',
+        code: 'TEMPLATE_NOT_FOUND',
+      });
+      expect(JSON.stringify(body)).not.toMatch(
+        /template-workspace|outside-template|Template externo|manifest\.json/i
+      );
+      expect(console.error).toHaveBeenCalled();
+    });
+  });
+
+  test.each([
     'missing-manifest',
     'missing-html',
   ])('retorna 404 estável para %s', async (page) => {

@@ -104,7 +104,10 @@ ausente invalidam somente a página correspondente. `listTemplates` retorna o
 catálogo válido e registra os diagnósticos; templates sem páginas válidas não
 entram na lista pública. `loadManifest` valida a presença dos diretórios, do
 manifest e do `index.html` e retorna o manifest junto com os caminhos
-resolvidos.
+resolvidos. Antes de acessar o filesystem, a resolução exige que `template` e
+`page` sejam segmentos diretos não vazios, sem `.`, `..`, NUL, `/` ou `\`.
+Também rejeita caminhos absolutos e comprova com `path.resolve` e
+`path.relative` que o diretório da página permanece em `TEMPLATE_ROOT`.
 
 `src/lib/assetResolver.js` resolve a logo padrão declarada no manifest:
 
@@ -124,12 +127,10 @@ nova chave no limite, remove a chave inserida há mais tempo (FIFO); consultar u
 chave existente não altera essa ordem. Não há TTL nem invalidação quando um
 manifest ou asset muda no filesystem.
 
-Os parâmetros `template` e `page` da rota ainda não são confinados a
-`TEMPLATE_ROOT`. Parâmetros codificados podem selecionar caminhos fora dessa
-raiz e, consequentemente, manifests que não pertencem ao catálogo normal. O
-limite do cache reduz o impacto desse caminho sobre memória, mas não corrige a
-travessia de diretórios, que permanece uma tarefa de segurança separada e
-prioritária.
+Os parâmetros `template` e `page` da rota são confinados a `TEMPLATE_ROOT` na
+fronteira de resolução do filesystem em `manifestLoader`. Assim, a mesma regra
+protege a rota e futuros chamadores de `loadManifest`; referências inválidas
+são classificadas como template ausente antes de qualquer leitura.
 
 `src/lib/safeHttpClient.js` centraliza os downloads feitos pelo servidor. Antes
 da conexão, valida protocolo e credenciais, resolve e fixa o endereço DNS e
@@ -312,7 +313,10 @@ Ausência de template, página, manifest ou HTML é convertida em HTTP 404 com
 arquivo obrigatório ilegível usa `500 TEMPLATE_FILE_UNREADABLE`; e falhas
 inesperadas usam `500 TEMPLATE_LOAD_FAILED`. Falhas ao resolver uma logo local
 são registradas internamente e resultam em `resolvedLogo: null`; falhas de
-assets remotos usam `502 TEMPLATE_REMOTE_ASSET_FAILED`.
+assets remotos usam `502 TEMPLATE_REMOTE_ASSET_FAILED`. Segmentos de template
+ou página com traversal, separadores codificados já decodificados pelo Express,
+NUL ou forma absoluta também recebem o 404 estável, sem caminhos internos na
+resposta.
 
 ## Extração de notícias
 

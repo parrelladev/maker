@@ -8,8 +8,43 @@ const {
 
 const TEMPLATE_ROOT = path.resolve('templates');
 
+function isInvalidPathSegment(value) {
+  return typeof value !== 'string'
+    || value.length === 0
+    || value === '.'
+    || value === '..'
+    || value.includes('/')
+    || value.includes('\\')
+    || value.includes('\0')
+    || path.isAbsolute(value)
+    || path.win32.isAbsolute(value);
+}
+
+function resolveTemplatePagePaths(template, page) {
+  if (isInvalidPathSegment(template) || isInvalidPathSegment(page)) {
+    throw new TemplateNotFoundError('Referência de template inválida');
+  }
+
+  const pageDir = path.resolve(TEMPLATE_ROOT, template, page);
+  const relative = path.relative(TEMPLATE_ROOT, pageDir);
+  if (
+    relative === '..'
+    || relative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relative)
+  ) {
+    throw new TemplateNotFoundError('Referência de template inválida');
+  }
+
+  return {
+    templateDir: path.resolve(TEMPLATE_ROOT, template),
+    pageDir,
+    manifestPath: path.join(pageDir, 'manifest.json'),
+    htmlPath: path.join(pageDir, 'index.html'),
+  };
+}
+
 function getManifestPath(template, page) {
-  return path.join(TEMPLATE_ROOT, template, page, 'manifest.json');
+  return resolveTemplatePagePaths(template, page).manifestPath;
 }
 
 async function readJson(manifestPath) {
@@ -45,10 +80,12 @@ async function ensureTemplateExists(templateDir, pageDir) {
 }
 
 async function loadManifest(template, page) {
-  const manifestPath = getManifestPath(template, page);
-  const templateDir = path.join(TEMPLATE_ROOT, template);
-  const pageDir = path.dirname(manifestPath);
-  const htmlPath = path.join(pageDir, 'index.html');
+  const {
+    templateDir,
+    pageDir,
+    manifestPath,
+    htmlPath,
+  } = resolveTemplatePagePaths(template, page);
 
   await ensureTemplateExists(templateDir, pageDir);
 
