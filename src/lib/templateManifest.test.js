@@ -124,6 +124,31 @@ describe('templateManifest', () => {
     expect(normalized).not.toHaveProperty('defaultLogo');
   });
 
+  test('segundo manifest real convertido declara a variante foto-abaixo', () => {
+    const manifest = require(path.resolve('templates/agazeta-foto-abaixo/index/manifest.json'));
+    const normalized = normalizeManifest(manifest);
+
+    expect(normalized.editorial).toEqual({
+      brand: 'agazeta', family: 'padrao', variant: 'foto-abaixo', label: 'Foto abaixo',
+    });
+    expect(normalized.formats).toEqual({
+      story: { dimensions: { width: 1080, height: 1920 } },
+    });
+    expect(normalized.themes).toEqual([
+      { id: 'azul', label: 'Azul' },
+      { id: 'branco', label: 'Branco' },
+      { id: 'preto', label: 'Preto' },
+    ]);
+    expect(normalized.brandAssets).toEqual({
+      logo: 'primary',
+      fonts: [
+        { alias: 'headline.black', family: 'Maga Black', weight: 900, style: 'normal' },
+        { alias: 'body.italic', family: 'Montserrat', weight: 400, style: 'italic' },
+      ],
+    });
+    expect(normalized).not.toHaveProperty('defaultLogo');
+  });
+
   test('rejeita contrato incompleto de assets de marca', () => {
     expect(() => validateManifest(editorialManifest({
       brandAssets: { logo: 'primary', fonts: [{ alias: 'headline.black' }] },

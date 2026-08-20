@@ -3,57 +3,98 @@ const path = require('path');
 const { buildEditorCatalog, resolveRenderer } = require('../lib/editorCatalog');
 const { loadTemplatePage } = require('./templatePageService');
 
-describe('renderer editorial real da A Gazeta', () => {
-  test('resolve uma estrutura para os três temas e monta a página com assets da marca', async () => {
-    const catalog = await buildEditorCatalog();
-    const selection = {
-      brand: 'agazeta', family: 'padrao', variant: 'foto-acima', format: 'story',
-    };
-    const rendererByTheme = ['azul', 'branco', 'preto'].map(theme => ({
-      theme,
-      renderer: resolveRenderer(catalog, { ...selection, theme }),
-    }));
+const THEMES = [
+  { id: 'azul', label: 'Azul' },
+  { id: 'branco', label: 'Branco' },
+  { id: 'preto', label: 'Preto' },
+];
 
-    expect(rendererByTheme.map(({ renderer }) => renderer)).toEqual([
-      rendererByTheme[0].renderer,
-      rendererByTheme[0].renderer,
-      rendererByTheme[0].renderer,
+describe('renderers editoriais reais da A Gazeta', () => {
+  test('descobre e resolve duas variantes reais da mesma família sem expor refs técnicas', async () => {
+    const catalog = await buildEditorCatalog();
+    const agazeta = catalog.brands.find(({ id }) => id === 'agazeta');
+    const family = agazeta.families.find(({ id }) => id === 'padrao');
+
+    expect(family.variants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'foto-acima', label: 'Foto acima' }),
+      expect.objectContaining({ id: 'foto-abaixo', label: 'Foto abaixo' }),
+    ]));
+    for (const variant of ['foto-acima', 'foto-abaixo']) {
+      expect(family.variants.find(({ id }) => id === variant).formats).toEqual([{
+        id: 'story', dimensions: { width: 1080, height: 1920 }, themes: THEMES,
+      }]);
+    }
+
+    const fotoAcima = resolveRenderer(catalog, {
+      brand: 'agazeta', family: 'padrao', variant: 'foto-acima', format: 'story',
+    });
+    const fotoAbaixo = resolveRenderer(catalog, {
+      brand: 'agazeta', family: 'padrao', variant: 'foto-abaixo', format: 'story',
+    });
+    expect(fotoAcima).toMatchObject({ template: 'agazeta-foto-acima', page: 'index' });
+    expect(fotoAbaixo).toMatchObject({ template: 'agazeta-foto-abaixo', page: 'index' });
+    expect({ template: fotoAcima.template, page: fotoAcima.page })
+      .not.toEqual({ template: fotoAbaixo.template, page: fotoAbaixo.page });
+
+    const serialized = JSON.stringify(catalog);
+    expect(serialized).not.toContain(path.resolve('.'));
+    expect(serialized).not.toContain('rendererRef');
+    expect(serialized).not.toContain('headline-black.woff2');
+    expect(serialized).not.toContain('primary.svg');
+  });
+
+  test.each([
+    ['foto-acima', 'agazeta-foto-acima'],
+    ['foto-abaixo', 'agazeta-foto-abaixo'],
+  ])('monta %s com um renderer compartilhado pelos temas e assets da marca', async (variant, template) => {
+    const catalog = await buildEditorCatalog();
+    const selection = { brand: 'agazeta', family: 'padrao', variant, format: 'story' };
+    const rendererByTheme = ['azul', 'branco', 'preto'].map(theme =>
+      resolveRenderer(catalog, { ...selection, theme })
+    );
+
+    expect(rendererByTheme).toEqual([
+      rendererByTheme[0], rendererByTheme[0], rendererByTheme[0],
     ]);
-    expect(rendererByTheme[0].renderer).toMatchObject({
-      template: 'agazeta-foto-acima',
-      page: 'index',
-      dimensions: { width: 1080, height: 1920 },
-      themes: [
-        { id: 'azul', label: 'Azul' },
-        { id: 'branco', label: 'Branco' },
-        { id: 'preto', label: 'Preto' },
-      ],
+    expect(rendererByTheme[0]).toMatchObject({
+      template, page: 'index', dimensions: { width: 1080, height: 1920 }, themes: THEMES,
     });
 
-    const page = await loadTemplatePage(
-      rendererByTheme[0].renderer.template,
-      rendererByTheme[0].renderer.page
-    );
-    expect(page.manifest.dimensions).toEqual(rendererByTheme[0].renderer.dimensions);
+    const page = await loadTemplatePage(rendererByTheme[0].template, rendererByTheme[0].page);
+    expect(page.html).toContain('<!DOCTYPE html>');
+    expect(page.manifest.dimensions).toEqual(rendererByTheme[0].dimensions);
     expect(page.manifest.brandAssets).toMatchObject({
       logo: 'primary',
-      fonts: [
-        { alias: 'headline.black' },
-        { alias: 'body.italic' },
-      ],
+      fonts: [{ alias: 'headline.black' }, { alias: 'body.italic' }],
     });
     expect(page.manifest.bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ selector: '#bg', type: 'image' }),
       expect.objectContaining({ selector: '#logo', type: 'logo' }),
+      expect.objectContaining({ selector: '#tag', type: 'text' }),
       expect.objectContaining({ selector: '#title', type: 'text' }),
+      expect.objectContaining({ selector: '#subtitle', type: 'text' }),
     ]));
     expect(page.resolvedLogo).toMatchObject({ kind: 'inline-svg' });
     expect(page.css[0]).toMatchObject({ name: 'brand-fonts.css' });
     expect(page.css[0].content).toContain('data:font/woff2;base64,');
+    expect(page.css).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: path.join('css', 'base.css') }),
+      expect.objectContaining({ name: path.join('css', 'theme-azul.css') }),
+      expect.objectContaining({ name: path.join('css', 'theme-branco.css') }),
+      expect.objectContaining({ name: path.join('css', 'theme-preto.css') }),
+    ]));
     expect(JSON.stringify(page)).not.toContain(path.resolve('.'));
 
-    const rendererDirectory = path.resolve('templates/agazeta-foto-acima');
-    const files = await fs.readdir(rendererDirectory, { recursive: true });
+    const files = await fs.readdir(path.resolve(`templates/${template}`), { recursive: true });
     expect(files.filter(file => path.basename(file) === 'index.html')).toHaveLength(1);
     expect(files.filter(file => path.basename(file) === 'manifest.json')).toHaveLength(1);
+  });
+
+  test('um template legado continua carregando pelo serviço técnico', async () => {
+    const page = await loadTemplatePage('se-cuida', 'index');
+
+    expect(page.manifest.editorial).toBeNull();
+    expect(page.manifest.dimensions).toEqual({ width: 1080, height: 1920 });
+    expect(page.html).toContain('<!DOCTYPE html>');
   });
 });

@@ -109,14 +109,17 @@ renderer técnico. Além de `{ template, page }`, seu resultado inclui cópias d
 configuração aplicada pelo runtime atual (stylesheet e atributo no mesmo HTML),
 e não participa da chave técnica marca/família/variante/formato.
 
-O primeiro renderer real migrado por essa fronteira é
-`agazeta/padrao/foto-acima/story`. Seu manifest referencia `primary`,
-`headline.black` e `body.italic`; os arquivos correspondentes continuam sendo
-definidos somente no Brand Registry. `templatePageService` pede esses aliases a
-uma pequena camada de resolução, recebe a logo sanitizada e gera as regras de
-fontes consumidas pelo mesmo iframe sem publicar paths absolutos. Os renderers
-legados continuam usando `defaultLogo` e seus CSS atuais, tornando a migração
-incremental.
+Os renderers reais `agazeta/padrao/foto-acima/story` e
+`agazeta/padrao/foto-abaixo/story` são descobertos declarativamente a partir de
+seus manifests. Como as composições são estruturalmente diferentes, cada
+variante mantém seu próprio HTML, enquanto azul, branco e preto compartilham o
+mesmo renderer dentro de cada variante. Ambos os manifests referenciam
+`primary`, `headline.black` e `body.italic`; os arquivos correspondentes
+continuam sendo definidos somente no Brand Registry. `templatePageService`
+pede esses aliases a uma pequena camada de resolução, recebe a logo sanitizada
+e gera as regras de fontes consumidas pelo mesmo iframe sem publicar paths
+absolutos. Os renderers legados continuam usando `defaultLogo` e seus CSS
+atuais, tornando a migração incremental.
 
 ## Finalidade da aplicação
 

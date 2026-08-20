@@ -1,8 +1,29 @@
 {
   "name": "Layout horizontal - index",
-  "dimensions": { "width": 1080, "height": 1920 },
+  "editor": {
+    "brand": "agazeta",
+    "family": "padrao",
+    "variant": "foto-abaixo",
+    "label": "Foto abaixo"
+  },
+  "formats": {
+    "story": {
+      "dimensions": { "width": 1080, "height": 1920 }
+    }
+  },
+  "themes": [
+    { "id": "azul", "label": "Azul" },
+    { "id": "branco", "label": "Branco" },
+    { "id": "preto", "label": "Preto" }
+  ],
+  "brandAssets": {
+    "logo": "primary",
+    "fonts": [
+      { "alias": "headline.black", "family": "Maga Black", "weight": 900, "style": "normal" },
+      { "alias": "body.italic", "family": "Montserrat", "weight": 400, "style": "italic" }
+    ]
+  },
   "logoField": "logo",
-  "defaultLogo": "logo-a-gazeta.svg",
   "bindings": [
     { "selector": "#bg", "type": "image", "field": "resolvedBg", "required": true },
     { "selector": "#logo", "type": "logo", "field": "resolvedLogo", "required": true },
