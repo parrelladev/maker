@@ -50,11 +50,6 @@ router.post('/extract', async (req, res) => {
     const { h1, h2, bg, chapeu } = await newsScraper.fetch(url);
     const embeddedBg = bg ? await embedImage(bg) : null;
 
-    if (chapeu) {
-      // eslint-disable-next-line no-console
-      console.debug('[scraper] Chapéu extraído:', chapeu);
-    }
-
     return res.json({ h1, h2, bg: embeddedBg, bgSource: bg, chapeu });
   } catch (error) {
     const publicError = getPublicRemoteError(error, {
