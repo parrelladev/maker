@@ -1,4 +1,8 @@
+const fs = require('fs');
 const http = require('http');
+const https = require('https');
+const path = require('path');
+const { fork } = require('child_process');
 const { callbackify } = require('util');
 const axios = require('axios');
 const {
@@ -29,6 +33,81 @@ const requestOptions = {
   responseType: 'text',
 };
 const publicAddresses = [{ address: '93.184.216.34', family: 4 }];
+const proxyChildPath = path.join(
+  __dirname,
+  '../../test/fixtures/safe-http-proxy-child.js'
+);
+const tlsCertificatePath = path.join(
+  __dirname,
+  '../../test/fixtures/safe-http-proxy-cert.pem'
+);
+const tlsPrivateKeyPath = path.join(
+  __dirname,
+  '../../test/fixtures/safe-http-proxy-key.pem'
+);
+
+function listen(server, host = '127.0.0.1') {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, host, resolve);
+  });
+}
+
+function closeServer(server) {
+  if (!server.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+function runProxyChild({ targetUrl, proxyUrl, extraEnv = {} }) {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const child = fork(proxyChildPath, {
+      env: {
+        ...process.env,
+        NODE_USE_ENV_PROXY: '1',
+        HTTP_PROXY: proxyUrl,
+        HTTPS_PROXY: proxyUrl,
+        ALL_PROXY: proxyUrl,
+        NO_PROXY: '',
+        http_proxy: proxyUrl,
+        https_proxy: proxyUrl,
+        all_proxy: proxyUrl,
+        no_proxy: '',
+        SAFE_HTTP_TARGET_URL: targetUrl,
+        ...extraEnv,
+      },
+      silent: true,
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('processo filho do teste de proxy excedeu o tempo'));
+    }, 5000);
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('message', (message) => {
+      clearTimeout(timer);
+      resolve(message);
+      if (child.connected) child.disconnect();
+      if (!child.killed) child.kill();
+    });
+    child.once('close', (code) => {
+      if (code !== 0 && code !== null) {
+        clearTimeout(timer);
+        reject(new Error(
+          `processo filho encerrou com código ${code}: ${stderr.trim()}`
+        ));
+      }
+    });
+  });
+}
 
 describe('safeHttpClient', () => {
   test.each([
@@ -243,8 +322,65 @@ describe('safeHttpClient', () => {
       maxRedirects: 0,
       proxy: false,
     });
+    expect(httpClient.get.mock.calls[0][1].httpAgent).toBeInstanceOf(http.Agent);
+    expect(httpClient.get.mock.calls[0][1].httpsAgent).toBeInstanceOf(https.Agent);
+    expect(httpClient.get.mock.calls[0][1].httpAgent.keepAlive).toBe(false);
+    expect(httpClient.get.mock.calls[0][1].httpsAgent.keepAlive).toBe(false);
     expect(httpClient.get.mock.calls[0][1].timeout).toBeGreaterThan(0);
     expect(httpClient.get.mock.calls[0][1].timeout).toBeLessThanOrEqual(1000);
+  });
+
+  test('cria Agents sem reuso para cada salto validado', async () => {
+    const httpClient = {
+      get: jest.fn()
+        .mockResolvedValueOnce(response('', 302, { location: 'https://next.example/file' }))
+        .mockResolvedValueOnce(response('ok')),
+    };
+    const httpAgents = [{ kind: 'http-1' }, { kind: 'http-2' }];
+    const httpsAgents = [{ kind: 'https-1' }, { kind: 'https-2' }];
+    const createHttpAgent = jest.fn()
+      .mockReturnValueOnce(httpAgents[0])
+      .mockReturnValueOnce(httpAgents[1]);
+    const createHttpsAgent = jest.fn()
+      .mockReturnValueOnce(httpsAgents[0])
+      .mockReturnValueOnce(httpsAgents[1]);
+    const client = createSafeHttpClient({
+      httpClient,
+      resolveHostname: jest.fn().mockResolvedValue(publicAddresses),
+      createHttpAgent,
+      createHttpsAgent,
+    });
+
+    await expect(
+      client.get('https://example.com/file', requestOptions)
+    ).resolves.toMatchObject({ data: 'ok' });
+
+    expect(createHttpAgent).toHaveBeenCalledTimes(2);
+    expect(createHttpsAgent).toHaveBeenCalledTimes(2);
+    expect(httpClient.get.mock.calls.map(([, config]) => config.httpAgent)).toEqual(
+      httpAgents
+    );
+    expect(httpClient.get.mock.calls.map(([, config]) => config.httpsAgent)).toEqual(
+      httpsAgents
+    );
+  });
+
+  test('preserva hostname HTTPS, lookup fixado e validação TLS normal', async () => {
+    const httpClient = { get: jest.fn().mockResolvedValue(response()) };
+    const client = createSafeHttpClient({
+      httpClient,
+      resolveHostname: jest.fn().mockResolvedValue(publicAddresses),
+    });
+
+    await client.get('https://secure.example/file', requestOptions);
+
+    const [url, config] = httpClient.get.mock.calls[0];
+    expect(url).toBe('https://secure.example/file');
+    expect(config.httpsAgent).toBeInstanceOf(https.Agent);
+    expect(config.httpsAgent.options.rejectUnauthorized).not.toBe(false);
+    await expect(config.lookup('secure.example', { all: true })).resolves.toEqual(
+      publicAddresses
+    );
   });
 
   test('limita redirects gerenciados e valida cada salto antes da conexão', async () => {
@@ -549,6 +685,199 @@ describe('safeHttpClient com adaptador Axios real', () => {
           server.close((error) => (error ? reject(error) : resolve()));
         });
       }
+    }
+  });
+
+  test('não reutiliza socket quando nova validação fixa outro endereço', async () => {
+    const sockets = new Set();
+    const requests = [];
+    const servers = ['127.0.0.1', '127.0.0.2'].map((address) => {
+      const server = http.createServer((req, res) => {
+        requests.push({ host: req.headers.host, localAddress: req.socket.localAddress });
+        res.end(req.socket.localAddress);
+      });
+      server.on('connection', (socket) => {
+        sockets.add(socket);
+        socket.once('close', () => sockets.delete(socket));
+      });
+      return server;
+    });
+
+    try {
+      await Promise.all(servers.map((server, index) =>
+        listen(server, index === 0 ? '127.0.0.1' : '127.0.0.2')));
+      const port = servers[0].address().port;
+      await closeServer(servers[1]);
+      await new Promise((resolve, reject) => {
+        servers[1].once('error', reject);
+        servers[1].listen(port, '127.0.0.2', resolve);
+      });
+      const resolveHostname = jest.fn()
+        .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }])
+        .mockResolvedValueOnce([{ address: '127.0.0.2', family: 4 }]);
+      const client = createSafeHttpClient({
+        httpClient: axios,
+        resolveHostname,
+        isAddressAllowed: (address) => address.startsWith('127.0.0.'),
+      });
+      const url = `http://changing.example.test:${port}/fixture`;
+
+      await expect(client.get(url, requestOptions)).resolves.toMatchObject({
+        data: '127.0.0.1',
+      });
+      await expect(client.get(url, requestOptions)).resolves.toMatchObject({
+        data: '127.0.0.2',
+      });
+
+      expect(resolveHostname).toHaveBeenCalledTimes(2);
+      expect(requests).toEqual([
+        { host: `changing.example.test:${port}`, localAddress: '127.0.0.1' },
+        { host: `changing.example.test:${port}`, localAddress: '127.0.0.2' },
+      ]);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await Promise.all(servers.map(closeServer));
+    }
+  });
+
+  test('HTTP ignora proxy ambiental no nível TCP e conecta ao endereço validado', async () => {
+    const sockets = new Set();
+    const targetRequests = [];
+    const proxyRequests = [];
+    let targetTcpConnections = 0;
+    let proxyTcpConnections = 0;
+    const target = http.createServer((req, res) => {
+      targetRequests.push({ host: req.headers.host, url: req.url });
+      res.end('target');
+    });
+    const proxy = http.createServer((req, res) => {
+      proxyRequests.push({ host: req.headers.host, url: req.url });
+      res.end('proxy');
+    });
+    for (const [server, countConnection] of [
+      [target, () => { targetTcpConnections += 1; }],
+      [proxy, () => { proxyTcpConnections += 1; }],
+    ]) {
+      server.on('connection', (socket) => {
+        countConnection();
+        sockets.add(socket);
+        socket.once('close', () => sockets.delete(socket));
+      });
+    }
+    proxy.on('connect', (req, socket) => {
+      proxyRequests.push({ method: 'CONNECT', url: req.url });
+      socket.destroy();
+    });
+
+    try {
+      await Promise.all([target, proxy].map((server) => listen(server)));
+      const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
+      const childResult = await runProxyChild({
+        proxyUrl,
+        targetUrl: `http://public.example.test:${target.address().port}/fixture`,
+      });
+
+      expect(childResult).toEqual({
+        ok: true,
+        data: 'target',
+        validationLookups: 1,
+        pinnedLookups: 1,
+      });
+      expect(targetRequests).toEqual([{
+        host: `public.example.test:${target.address().port}`,
+        url: '/fixture',
+      }]);
+      expect(targetTcpConnections).toBe(1);
+      expect(proxyTcpConnections).toBe(0);
+      expect(proxyRequests).toEqual([]);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await Promise.all([target, proxy].map(closeServer));
+    }
+  });
+
+  test('HTTPS preserva Host e SNI, valida TLS e ignora proxy ambiental no nível TCP', async () => {
+    const sockets = new Set();
+    const targetRequests = [];
+    const observedSni = [];
+    const proxyRequests = [];
+    let targetTcpConnections = 0;
+    let proxyTcpConnections = 0;
+    const target = https.createServer({
+      cert: fs.readFileSync(tlsCertificatePath),
+      key: fs.readFileSync(tlsPrivateKeyPath),
+    }, (req, res) => {
+      targetRequests.push({
+        host: req.headers.host,
+        localAddress: req.socket.localAddress,
+      });
+      res.end('secure-target');
+    });
+    target.on('secureConnection', (socket) => observedSni.push(socket.servername));
+    target.on('connection', (socket) => {
+      targetTcpConnections += 1;
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
+    });
+    const proxy = http.createServer((req, res) => {
+      proxyRequests.push({ method: req.method, url: req.url });
+      res.end('proxy');
+    });
+    proxy.on('connect', (req, socket) => {
+      proxyRequests.push({ method: 'CONNECT', url: req.url });
+      socket.destroy();
+    });
+    proxy.on('connection', (socket) => {
+      proxyTcpConnections += 1;
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
+    });
+
+    try {
+      await Promise.all([target, proxy].map((server) => listen(server)));
+      const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
+      const targetUrl =
+        `https://secure.example.test:${target.address().port}/fixture`;
+      const childResult = await runProxyChild({
+        proxyUrl,
+        targetUrl,
+        extraEnv: { NODE_EXTRA_CA_CERTS: tlsCertificatePath },
+      });
+
+      expect(childResult).toEqual({
+        ok: true,
+        data: 'secure-target',
+        validationLookups: 1,
+        pinnedLookups: 1,
+      });
+      expect(targetRequests).toEqual([{
+        host: `secure.example.test:${target.address().port}`,
+        localAddress: '127.0.0.1',
+      }]);
+      expect(observedSni).toEqual(['secure.example.test']);
+      expect(targetTcpConnections).toBe(1);
+      expect(proxyTcpConnections).toBe(0);
+      expect(proxyRequests).toEqual([]);
+
+      const untrustedResult = await runProxyChild({
+        proxyUrl,
+        targetUrl,
+        extraEnv: { NODE_EXTRA_CA_CERTS: '' },
+      });
+      expect(untrustedResult).toMatchObject({
+        ok: false,
+        code: 'REQUEST_FAILED',
+        validationLookups: 1,
+        pinnedLookups: 1,
+      });
+      expect(untrustedResult.causeCode).toMatch(/SELF_SIGNED_CERT/);
+      expect(targetRequests).toHaveLength(1);
+      expect(targetTcpConnections).toBe(2);
+      expect(proxyTcpConnections).toBe(0);
+      expect(proxyRequests).toEqual([]);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await Promise.all([target, proxy].map(closeServer));
     }
   });
 });

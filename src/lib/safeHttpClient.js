@@ -1,4 +1,6 @@
 const dns = require('dns');
+const http = require('http');
+const https = require('https');
 const net = require('net');
 const { performance } = require('perf_hooks');
 const axios = require('axios');
@@ -232,6 +234,8 @@ function createSafeHttpClient({
   resolveHostname = (hostname) => dns.promises.lookup(hostname, { all: true, verbatim: true }),
   isAddressAllowed = isPublicIp,
   now = () => performance.now(),
+  createHttpAgent = () => new http.Agent({ keepAlive: false }),
+  createHttpsAgent = () => new https.Agent({ keepAlive: false }),
 } = {}) {
   function getRemainingTime(deadline) {
     const remainingMs = deadline - now();
@@ -350,6 +354,8 @@ function createSafeHttpClient({
         const hostname = normalizeHostname(currentUrl.hostname);
         const validatedAddresses = await resolvePublicAddresses(hostname, deadline);
         const remainingMs = getRemainingTime(deadline);
+        const httpAgent = createHttpAgent();
+        const httpsAgent = createHttpsAgent();
         const response = await withDeadline(
           Promise.resolve().then(() =>
             httpClient.get(currentUrl.href, {
@@ -361,6 +367,8 @@ function createSafeHttpClient({
               maxRedirects: 0,
               validateStatus: (status) => status >= 200 && status < 400,
               lookup: createPinnedLookup(hostname, validatedAddresses),
+              httpAgent,
+              httpsAgent,
               proxy: false,
             })
           ),
