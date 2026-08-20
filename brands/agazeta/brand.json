@@ -1,0 +1,15 @@
+{
+  "id": "agazeta",
+  "name": "A Gazeta",
+  "logos": {
+    "primary": "logos/primary.svg"
+  },
+  "fonts": {
+    "headline": {
+      "black": "fonts/headline-black.woff2"
+    },
+    "body": {
+      "italic": "fonts/body-italic.woff2"
+    }
+  }
+}

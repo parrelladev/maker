@@ -1,0 +1,10 @@
+{
+  "id": "escaping-font",
+  "name": "Escaping Font",
+  "logos": {},
+  "fonts": {
+    "headline": {
+      "bold": "../outside.woff2"
+    }
+  }
+}

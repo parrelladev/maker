@@ -16,6 +16,24 @@ iframe ou identidade de operações assíncronas, não pertence a `publication`.
 O módulo é uma fundação de domínio sem dependência de DOM, templates ou
 marcas específicas e ainda não está integrado à interface existente.
 
+## Registry de marcas (fundacional)
+
+O diretório `brands/<brandId>` concentra a identidade de cada marca em
+`brand.json`, `logos/` e `fonts/`. Logos e fontes pertencem à marca e são
+referenciados por aliases semânticos estáveis, como `primary` e
+`headline.black`, sem obrigar consumidores a conhecer filenames ou caminhos
+globais.
+
+`src/lib/brandRegistry.js` descobre marcas válidas, carrega seus metadados e
+resolve aliases com confinamento à pasta da marca. A representação de listagem
+expõe somente `id` e `name`; paths absolutos permanecem internos ao loader. O
+registry ainda não está exposto por HTTP nem integrado ao editor.
+
+Marca e template são responsabilidades separadas: logos e fontes pertencem à
+marca; composição pertence à variante; dimensões pertencem ao formato; tema
+não deve ser confundido com identidade estrutural. Os templates existentes
+continuam usando seus assets atuais até uma migração posterior e incremental.
+
 ## Finalidade da aplicação
 
 O Maker é uma aplicação web para produzir artes PNG a partir de templates

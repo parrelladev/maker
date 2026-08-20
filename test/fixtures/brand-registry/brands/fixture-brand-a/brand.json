@@ -1,0 +1,12 @@
+{
+  "id": "fixture-brand-a",
+  "name": "Fixture Brand A",
+  "logos": {
+    "primary": "logos/primary.svg"
+  },
+  "fonts": {
+    "headline": {
+      "bold": "fonts/headline-bold.woff2"
+    }
+  }
+}

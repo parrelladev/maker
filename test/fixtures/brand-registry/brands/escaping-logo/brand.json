@@ -1,0 +1,8 @@
+{
+  "id": "escaping-logo",
+  "name": "Escaping Logo",
+  "logos": {
+    "primary": "../outside.svg"
+  },
+  "fonts": {}
+}

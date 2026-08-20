@@ -1,0 +1,12 @@
+{
+  "id": "fixture-brand-b",
+  "name": "Fixture Brand B",
+  "logos": {
+    "symbol": "logos/symbol.svg"
+  },
+  "fonts": {
+    "body": {
+      "regular": "fonts/body-regular.woff2"
+    }
+  }
+}
