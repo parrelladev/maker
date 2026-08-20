@@ -146,6 +146,42 @@ No schema atual, `themes` pertence ao renderer como um todo. Assim, todos os
 formatos declarados pelo mesmo manifest compartilham o mesmo conjunto de temas;
 temas específicos por formato exigiriam uma evolução futura do schema.
 
+### Importação de notícia no editor
+
+O botão **Importar notícia** pertence a `public/js/editor-ui.js`. O controller
+valida a URL com a regra HTTP/HTTPS já usada pelo frontend, adapta o contrato de
+transporte `{ h1, h2, chapeu, bg }` para um patch editorial de
+`{ title, subtitle, tag, image }` e aplica esse patch atomicamente ao `content`
+compartilhado da `publication`. Somente valores não vazios entram no patch;
+campos ausentes preservam o conteúdo editorial atual. Em seguida, os campos do
+shell são derivados da `publication` e o mesmo renderer atualmente selecionado
+recebe uma única atualização de dados, sem nova chamada a `/api/editor/resolve`.
+
+A ponte `LegacyEditorBridge` ainda encapsula a chamada ao cache de extração
+existente, a provenance técnica da imagem e a aplicação no runtime do iframe.
+Resultados vazios continuam não cacheáveis. O controller mantém uma identidade
+monotônica da importação e compara também a URL editorial atual: respostas
+anteriores a outra importação, a uma edição de URL ou a **Nova arte** são
+descartadas silenciosamente. Trocar variante durante a requisição não invalida
+o conteúdo; a resposta é aplicada ao renderer que estiver atual.
+
+Durante a importação, a razão composta `news-import` bloqueia **Baixar atual**.
+Qualquer mudança de `publication.content` também inicia uma sincronização
+versionada e mantém a razão `content-sync` ativa até o snapshot editorial atual
+ser aplicado efetivamente ao runtime do iframe. Conclusões obsoletas não podem
+remover essa razão nem alterar o status. `content-sync` compõe com os bloqueios
+independentes `editor-preview` e `export`, e a guarda programática do download
+também exige que não haja sincronização de conteúdo pendente.
+Operações stale de `content-sync` não possuem autoridade para alterar status ou
+readiness da UI.
+
+No novo caminho, `LegacyEditorBridge.applyPublicationContent()` monta o payload
+diretamente do `content` recebido; os inputs permanecem uma projeção visual e
+não precisam ser relidos como fonte editorial. A ponte combina esse snapshot
+com a provenance técnica existente para distinguir imagem manual de imagem
+extraída e vinculada à URL exata. Feed e Comparar continuam fora do fluxo
+funcional.
+
 ### Fronteira editorial e primeiro renderer migrado
 
 `resolveRenderer()` é a fronteira oficial entre a seleção editorial e o

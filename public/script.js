@@ -118,6 +118,7 @@ let latestGenerationId = 0;
 let latestNewsFetchId = 0;
 let latestBestEffortPreviewUpdateId = 0;
 let editorPreviewReady = true;
+let contentSyncPending = false;
 const generateDisableReasons = new Set();
 let resolvedImageFieldState = {
   source: null,
@@ -325,12 +326,6 @@ function setupEventListeners() {
 
   generateBtn.addEventListener('click', generateArtWithPreviewFlow);
 
-  newsUrl.addEventListener('keypress', (event) => {
-    if (event.key === 'Enter') {
-      handleFetchNewsAndPreview();
-    }
-  });
-
   newsUrl.addEventListener('input', () => {
     clearResolvedImageFieldState({ clearMatchingField: true });
     if (fetchDataBtn) {
@@ -338,32 +333,28 @@ function setupEventListeners() {
     }
   });
 
-  if (fetchDataBtn) {
-    fetchDataBtn.addEventListener('click', handleFetchNewsAndPreview);
-  }
-
   if (customTitle) {
     customTitle.addEventListener('input', () => {
-      requestBestEffortPreviewUpdate();
+      if (!window.EditorController) requestBestEffortPreviewUpdate();
     });
   }
 
   if (customSubtitle) {
     customSubtitle.addEventListener('input', () => {
-      requestBestEffortPreviewUpdate();
+      if (!window.EditorController) requestBestEffortPreviewUpdate();
     });
   }
 
   if (customTag) {
     customTag.addEventListener('input', () => {
-      requestBestEffortPreviewUpdate();
+      if (!window.EditorController) requestBestEffortPreviewUpdate();
     });
   }
 
   if (customImageUrl) {
     customImageUrl.addEventListener('input', () => {
       clearResolvedImageFieldState();
-      requestBestEffortPreviewUpdate();
+      if (!window.EditorController) requestBestEffortPreviewUpdate();
     });
   }
 
@@ -811,8 +802,28 @@ function buildPreviewData(
   manifestData,
   backgroundOverride = null,
   formData = readGenerationFormData(),
-  extractedDataOverride = null
+  extractedDataOverride = null,
+  contentOverride = null
 ) {
+  if (contentOverride) {
+    const contentImage = normalizeOptionalValue(contentOverride.image);
+    const hasMatchingResolvedImage = (
+      resolvedImageFieldState.source === 'extracted'
+      && resolvedImageFieldState.value === contentImage
+      && resolvedImageFieldState.newsUrl === normalizeOptionalValue(contentOverride.url)
+    );
+    formData = {
+      newsUrl: normalizeOptionalValue(contentOverride.url),
+      manualTitle: normalizeOptionalValue(contentOverride.title),
+      manualSubtitle: normalizeOptionalValue(contentOverride.subtitle),
+      manualCategory: normalizeOptionalValue(contentOverride.tag),
+      manualImage: hasMatchingResolvedImage ? '' : contentImage,
+      resolvedImage: hasMatchingResolvedImage ? contentImage : '',
+      theme: currentTheme,
+      template: currentTemplate
+    };
+    extractedDataOverride = hasMatchingResolvedImage ? { bg: contentImage } : {};
+  }
   const url = formData.newsUrl;
   const hasMatchingNews = lastNewsUrl && lastNewsUrl === url && lastNewsData;
   const extractedData = extractedDataOverride || (hasMatchingNews ? lastNewsData : {});
@@ -871,7 +882,7 @@ function requestBestEffortPreviewUpdate() {
     .catch(error => handleBestEffortPreviewUpdateError(error, context));
 }
 
-async function updatePreview(backgroundOverride = null, assertCurrent = null) {
+async function updatePreview(backgroundOverride = null, assertCurrent = null, contentOverride = null) {
   if (!previewFrame || !currentTemplate) {
     return;
   }
@@ -881,7 +892,7 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null) {
     if (!manifestData) return;
     if (assertCurrent) assertCurrent();
 
-    const artworkData = buildPreviewData(manifestData, backgroundOverride);
+    const artworkData = buildPreviewData(manifestData, backgroundOverride, undefined, null, contentOverride);
     if (assertCurrent) assertCurrent();
     applyArtworkDataToPreview(artworkData);
   } catch (error) {
@@ -894,6 +905,46 @@ async function updatePreview(backgroundOverride = null, assertCurrent = null) {
 // Ponte temporária e única entre a seleção editorial e o estado do script legado.
 // O catálogo e a publication permanecem sob responsabilidade do novo controller.
 window.LegacyEditorBridge = {
+  importNews({ url, assertCurrent }) {
+    return getOrExtractNewsData(url, assertCurrent);
+  },
+
+  async applyPublicationContent({ content, importedImage = null, assertCurrent = null }) {
+    if (assertCurrent) assertCurrent();
+    if (importedImage) {
+      setExtractedImageFieldValue(importedImage.value, importedImage.url);
+    }
+    await updatePreview(null, assertCurrent, content);
+  },
+
+  reconcilePublicationContent({ content, changedField }) {
+    const nextContent = { ...content };
+    if (
+      changedField === 'url'
+      && resolvedImageFieldState.source === 'extracted'
+      && resolvedImageFieldState.newsUrl !== normalizeOptionalValue(content.url)
+      && resolvedImageFieldState.value === content.image
+    ) {
+      nextContent.image = '';
+      clearResolvedImageFieldState();
+    } else if (
+      changedField === 'image'
+      && resolvedImageFieldState.value !== content.image
+    ) {
+      clearResolvedImageFieldState();
+    }
+    return nextContent;
+  },
+
+  setNewsImportPending(pending) {
+    setGenerateDisabled('news-import', pending);
+  },
+
+  setContentSyncPending(pending) {
+    contentSyncPending = pending;
+    setGenerateDisabled('content-sync', pending);
+  },
+
   async selectRenderer({ renderer, theme, assertCurrent }) {
     if (assertCurrent) assertCurrent();
     modalSessionVersion += 1;
@@ -935,7 +986,7 @@ window.LegacyEditorBridge = {
 
 // Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
 async function generateArtWithPreviewFlow() {
-  if (!editorPreviewReady) {
+  if (!editorPreviewReady || contentSyncPending) {
     showToast('Aguarde o preview ficar pronto para baixar', 'info');
     return;
   }

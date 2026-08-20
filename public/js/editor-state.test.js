@@ -1,5 +1,6 @@
 const {
   DEFAULT_IMAGE_ADJUSTMENTS,
+  applyContentPatch,
   createPublication,
   resetImageAdjustments,
   setBrand,
@@ -72,6 +73,19 @@ describe('editor-state', () => {
     expect(next.content.image).toBe('https://example.com/image.jpg');
     expect(next.formats).toBe(adjusted.formats);
     expect(next.formats.feed.imageAdjustments.zoom).toBe(1.3);
+  });
+
+  test('aplica patch de conteudo em uma unica atualizacao imutavel', () => {
+    const publication = setContentField(createPublication(), 'subtitle', 'Manual');
+    const next = applyContentPatch(publication, { title: 'Importado', image: 'image-data' });
+    expect(next.content).toEqual({ url: '', title: 'Importado', subtitle: 'Manual', tag: '', image: 'image-data' });
+    expect(next.formats).toBe(publication.formats);
+    expect(publication.content.title).toBe('');
+  });
+
+  test('rejeita campo arbitrario no patch de conteudo', () => {
+    expect(() => applyContentPatch(createPublication(), { author: 'Nome' }))
+      .toThrow('Unknown content field: author');
   });
 
   test('altera zoom do Feed sem alterar Story', () => {

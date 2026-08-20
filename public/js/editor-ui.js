@@ -5,12 +5,14 @@
 })(typeof window !== 'undefined' ? window : globalThis, function createEditorUiModule() {
   const ACTIVE_FORMAT = 'story';
 
-  function createEditorController({ document, api, state, catalogHelpers, legacyBridge = null }) {
+  function createEditorController({ document, api, state, catalogHelpers, frontendUtils, legacyBridge = null }) {
     let catalog = null;
     let publication = state.createPublication();
     let latestRendererRequest = 0;
     let renderer = null;
     let previewState = 'idle';
+    let latestNewsImportId = 0;
+    let latestContentSyncId = 0;
 
     const controls = {
       brand: document.querySelector('[data-control="brand"]'),
@@ -19,11 +21,137 @@
       themes: document.querySelector('[data-control="themes"]'),
       status: document.querySelector('[data-editor-status]'),
       downloadCurrent: document.querySelector('[data-action="download-current"]'),
+      importNews: document.querySelector('[data-action="import-news"]'),
     };
 
     function setStatus(message) {
       const target = controls.status?.querySelector('span:last-child') || controls.status;
       if (target) target.textContent = message;
+    }
+
+    function syncContentFields() {
+      document.querySelectorAll('[data-field]').forEach(field => {
+        const name = field.dataset.field;
+        if (Object.prototype.hasOwnProperty.call(publication.content, name)) {
+          field.value = publication.content[name];
+        }
+      });
+    }
+
+    function usefulValue(value) {
+      return frontendUtils.normalizeOptionalValue(value);
+    }
+
+    function mapImportedContent(data) {
+      const mapping = { h1: 'title', h2: 'subtitle', chapeu: 'tag', bg: 'image' };
+      return Object.entries(mapping).reduce((patch, [transportField, contentField]) => {
+        const value = usefulValue(data?.[transportField]);
+        if (value) patch[contentField] = value;
+        return patch;
+      }, {});
+    }
+
+    function createNewsImportContext(url) {
+      return { id: ++latestNewsImportId, url };
+    }
+
+    function assertContentSyncCurrent(syncId, assertCurrent = null) {
+      if (syncId !== latestContentSyncId) {
+        const error = new Error('SincronizaÃ§Ã£o de conteÃºdo obsoleta');
+        error.code = 'OPERATION_STALE';
+        throw error;
+      }
+      if (assertCurrent) assertCurrent();
+    }
+
+    async function syncPublicationContentToPreview({
+      importedImage = null,
+      assertCurrent = null,
+      pendingStatus = 'Atualizando preview',
+      readyStatus = 'Pronto',
+    } = {}) {
+      const syncId = ++latestContentSyncId;
+      const content = { ...publication.content };
+      const assertSyncCurrent = () => assertContentSyncCurrent(syncId, assertCurrent);
+      legacyBridge?.setContentSyncPending?.(true);
+      if (pendingStatus) setStatus(pendingStatus);
+
+      try {
+        await legacyBridge.applyPublicationContent({ content, importedImage, assertCurrent: assertSyncCurrent });
+        assertSyncCurrent();
+        legacyBridge?.setContentSyncPending?.(false);
+        if (readyStatus) setStatus(readyStatus);
+        return true;
+      } catch (error) {
+        if (syncId !== latestContentSyncId || error?.code === 'OPERATION_STALE') return false;
+        setStatus('Preview nÃ£o pÃ´de ser atualizado');
+        throw error;
+      }
+    }
+
+    function reconcilePublicationContent(changedField) {
+      const reconciled = legacyBridge?.reconcilePublicationContent?.({
+        content: { ...publication.content },
+        changedField,
+      });
+      if (reconciled) publication = state.applyContentPatch(publication, reconciled);
+      syncContentFields();
+    }
+
+    function isNewsImportCurrent(context) {
+      return context.id === latestNewsImportId && publication.content.url === context.url;
+    }
+
+    function assertNewsImportCurrent(context) {
+      if (isNewsImportCurrent(context)) return;
+      const error = new Error('ImportaÃ§Ã£o de notÃ­cia obsoleta');
+      error.code = 'OPERATION_STALE';
+      throw error;
+    }
+
+    async function importNews() {
+      const urlField = document.querySelector('[data-field="url"]');
+      const url = usefulValue(urlField?.value);
+      publication = state.setContentField(publication, 'url', url);
+
+      if (!url || !frontendUtils.isHttpUrl(url)) {
+        latestNewsImportId += 1;
+        setStatus('Informe uma URL vÃ¡lida');
+        urlField?.focus?.();
+        return;
+      }
+
+      const context = createNewsImportContext(url);
+      const assertCurrent = () => assertNewsImportCurrent(context);
+      controls.importNews && (controls.importNews.disabled = true);
+      legacyBridge?.setNewsImportPending?.(true);
+      setStatus('Importando notÃ­cia');
+
+      try {
+        const imported = await legacyBridge.importNews({ url, assertCurrent });
+        assertCurrent();
+        const patch = mapImportedContent(imported);
+        if (!Object.keys(patch).length) throw new Error('NEWS_NOT_CONSUMABLE');
+        publication = state.applyContentPatch(publication, patch);
+        syncContentFields();
+        const contentApplied = await syncPublicationContentToPreview({
+          importedImage: patch.image ? { url, value: patch.image } : null,
+          assertCurrent,
+          pendingStatus: 'Importando notÃ­cia',
+          readyStatus: null,
+        });
+        if (!contentApplied) return;
+        assertCurrent();
+        setStatus('Pronto');
+      } catch (error) {
+        if (!isNewsImportCurrent(context) || error?.code === 'OPERATION_STALE') return;
+        if (isNewsImportCurrent(context)) setStatus('NÃ£o foi possÃ­vel importar a notÃ­cia');
+      } finally {
+        if (isNewsImportCurrent(context)) {
+          controls.importNews && (controls.importNews.disabled = false);
+          legacyBridge?.setNewsImportPending?.(false);
+        }
+      }
     }
 
     function setPreviewState(nextState) {
@@ -190,8 +318,21 @@
       document.querySelectorAll('[data-field]').forEach(field => {
         field.addEventListener('input', () => {
           publication = state.setContentField(publication, field.dataset.field, field.value);
+          if (field.dataset.field === 'url') {
+            latestNewsImportId += 1;
+            controls.importNews && (controls.importNews.disabled = false);
+            legacyBridge?.setNewsImportPending?.(false);
+          }
+          reconcilePublicationContent(field.dataset.field);
+          syncPublicationContentToPreview().catch(error => {
+            if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar conteÃºdo:', error);
+          });
         });
       });
+      document.querySelector('[data-field="url"]')?.addEventListener('keypress', event => {
+        if (event.key === 'Enter') importNews();
+      });
+      controls.importNews?.addEventListener('click', importNews);
       document.querySelector('[data-action="new-artwork"]')?.addEventListener('click', () => reset());
       document.querySelectorAll('[data-view-mode="feed"], [data-view-mode="compare"]')
         .forEach(button => button.addEventListener('click', () => setStatus('Em breve')));
@@ -199,6 +340,10 @@
 
     async function reset() {
       latestRendererRequest += 1;
+      latestNewsImportId += 1;
+      latestContentSyncId += 1;
+      legacyBridge?.setNewsImportPending?.(false);
+      legacyBridge?.setContentSyncPending?.(true);
       publication = state.createPublication();
       document.querySelectorAll('[data-field]').forEach(field => { field.value = ''; });
       const selection = catalogHelpers.chooseDefault(catalog, ACTIVE_FORMAT);
@@ -210,6 +355,7 @@
       applySelection(selection);
       render();
       await resolvePreview();
+      if (previewState === 'ready') await syncPublicationContentToPreview();
     }
 
     async function initialize() {
@@ -232,7 +378,9 @@
 
     return {
       initialize,
+      importNews,
       reset,
+      syncPublicationContentToPreview,
       selectBrand,
       selectFamily,
       selectTheme,
@@ -240,6 +388,7 @@
       getPublication: () => publication,
       getRenderer: () => renderer,
       getPreviewState: () => previewState,
+      getContentSyncId: () => latestContentSyncId,
     };
   }
 

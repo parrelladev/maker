@@ -4,6 +4,7 @@
     api: global.Api,
     state: global.EditorState,
     catalogHelpers: global.EditorCatalog,
+    frontendUtils: global.FrontendUtils,
     legacyBridge: global.LegacyEditorBridge,
   });
   global.EditorController = controller;

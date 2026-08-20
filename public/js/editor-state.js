@@ -87,6 +87,20 @@
     };
   }
 
+  function applyContentPatch(publication, patch) {
+    Object.keys(patch).forEach(field => {
+      requireAllowedKey(CONTENT_FIELDS, field, 'content field');
+    });
+
+    return {
+      ...publication,
+      content: {
+        ...publication.content,
+        ...patch
+      }
+    };
+  }
+
   function setFormatVariant(publication, format, variant) {
     return updateFormat(publication, format, currentFormat => ({
       ...currentFormat,
@@ -129,6 +143,7 @@
 
   return {
     DEFAULT_IMAGE_ADJUSTMENTS,
+    applyContentPatch,
     createPublication,
     resetImageAdjustments,
     setBrand,

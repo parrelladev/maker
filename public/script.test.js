@@ -777,6 +777,107 @@ describe('runtime de bindings carregado por public/script.js', () => {
 });
 
 describe('readiness editorial e exportação legada', () => {
+  test('content-sync compoe com editor-preview, news-import e export', () => {
+    const harness = createHarness();
+    harness.run(`
+      window.LegacyEditorBridge.setContentSyncPending(true);
+      window.LegacyEditorBridge.setEditorPreviewReady(false);
+      window.LegacyEditorBridge.setNewsImportPending(true);
+      showLoading();
+      window.LegacyEditorBridge.setContentSyncPending(false);
+      window.LegacyEditorBridge.setEditorPreviewReady(true);
+      window.LegacyEditorBridge.setNewsImportPending(false);
+    `);
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+    harness.run('hideLoading()');
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('guarda programatica impede export durante content-sync', async () => {
+    const harness = createHarness();
+    harness.run('window.LegacyEditorBridge.setContentSyncPending(true)');
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+    expect(harness.elements.toastContainer.children.at(-1).innerHTML)
+      .toContain('Aguarde o preview ficar pronto para baixar');
+  });
+
+  test('bridge real usa publication content e nao inputs divergentes no payload', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.customTitle.value = 'Titulo DOM antigo';
+    harness.elements.customSubtitle.value = 'Sub DOM antigo';
+    harness.elements.customTag.value = 'Tag DOM antiga';
+    harness.elements.customImageUrl.value = 'https://example.com/dom.jpg';
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({ content: {
+      url: 'https://example.com/b', title: 'Publication title',
+      subtitle: 'Publication subtitle', tag: 'Publication tag',
+      image: 'https://example.com/publication.jpg'
+    } })`);
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview).toHaveBeenCalledTimes(1);
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview.mock.calls[0][0]).toMatchObject({
+      h1: 'Publication title', h2: 'Publication subtitle', tag: 'Publication tag',
+      bg: 'https://example.com/publication.jpg'
+    });
+  });
+
+  test('URL nova invalida provenance extraida e remove a imagem antiga do payload', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({
+      content: { url: 'https://example.com/a', title: 'A', subtitle: '', tag: '', image: 'data:image/jpeg;base64,QQ==' },
+      importedImage: { url: 'https://example.com/a', value: 'data:image/jpeg;base64,QQ==' }
+    })`);
+    const reconciled = await harness.run(`window.LegacyEditorBridge.reconcilePublicationContent({
+      changedField: 'url',
+      content: { url: 'https://example.com/b', title: 'A', subtitle: '', tag: '', image: 'data:image/jpeg;base64,QQ==' }
+    })`);
+    expect(reconciled.image).toBe('');
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({ content: ${JSON.stringify(reconciled)} })`);
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview.mock.calls.at(-1)[0].bg).toBe('');
+    expect(JSON.parse(harness.run('JSON.stringify(resolvedImageFieldState)'))).toEqual({ source: null, value: null, newsUrl: null });
+  });
+
+  test('titulo manual posterior chega ao payload real e nao restaura importado', async () => {
+    const harness = createHarness();
+    harness.run(`openModal('agazeta-foto-abaixo')`);
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({ content: {
+      url: 'https://example.com/a', title: 'Titulo importado', subtitle: '', tag: '', image: ''
+    } })`);
+    harness.elements.customTitle.value = 'Titulo DOM antigo';
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({ content: {
+      url: 'https://example.com/a', title: 'Titulo manual', subtitle: '', tag: '', image: ''
+    } })`);
+    expect(harness.elements.previewFrame.contentWindow.__updatePreview.mock.calls.at(-1)[0].h1).toBe('Titulo manual');
+  });
+  test('news-import compoe com editor-preview e export', () => {
+    const harness = createHarness();
+    harness.run(`
+      window.LegacyEditorBridge.setNewsImportPending(true);
+      window.LegacyEditorBridge.setEditorPreviewReady(false);
+      showLoading();
+      window.LegacyEditorBridge.setNewsImportPending(false);
+    `);
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+    harness.run('window.LegacyEditorBridge.setEditorPreviewReady(true)');
+    expect(harness.elements.generateBtn.disabled).toBe(true);
+    harness.run('hideLoading()');
+    expect(harness.elements.generateBtn.disabled).toBe(false);
+  });
+
+  test('ponte aplica provenance da imagem importada vinculada a URL exata', async () => {
+    const harness = createHarness();
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({
+      content: { url: 'https://example.com/a', image: 'data:image/jpeg;base64,QQ==' },
+      importedImage: { url: 'https://example.com/a', value: 'data:image/jpeg;base64,QQ==' }
+    })`);
+    expect(JSON.parse(harness.run('JSON.stringify(resolvedImageFieldState)'))).toEqual({
+      source: 'extracted', value: 'data:image/jpeg;base64,QQ==', newsUrl: 'https://example.com/a'
+    });
+  });
   test('guarda de profundidade impede download enquanto o preview editorial não está pronto', async () => {
     const harness = createHarness();
     harness.run('window.LegacyEditorBridge.setEditorPreviewReady(false)');
