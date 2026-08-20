@@ -16,8 +16,14 @@
     { "id": "branco", "label": "Branco" },
     { "id": "preto", "label": "Preto" }
   ],
+  "brandAssets": {
+    "logo": "primary",
+    "fonts": [
+      { "alias": "headline.black", "family": "Maga Black", "weight": 900, "style": "normal" },
+      { "alias": "body.italic", "family": "Montserrat", "weight": 400, "style": "italic" }
+    ]
+  },
   "logoField": "logo",
-  "defaultLogo": "logo-a-gazeta.svg",
   "bindings": [
     { "selector": "#bg", "type": "image", "field": "resolvedBg", "required": true },
     { "selector": "#logo", "type": "logo", "field": "resolvedLogo", "required": true },

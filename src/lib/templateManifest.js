@@ -47,6 +47,30 @@ function validateThemes(themes) {
   }
 }
 
+function validateBrandAssets(brandAssets) {
+  if (brandAssets === undefined) return;
+  if (!isObject(brandAssets)) {
+    throw new TemplateManifestSchemaError('brandAssets deve ser um objeto');
+  }
+  requireNonEmptyString(brandAssets.logo, 'brandAssets.logo');
+  if (!Array.isArray(brandAssets.fonts)) {
+    throw new TemplateManifestSchemaError('brandAssets.fonts deve ser um array');
+  }
+  for (const [index, font] of brandAssets.fonts.entries()) {
+    if (!isObject(font)) {
+      throw new TemplateManifestSchemaError(`brandAssets.fonts[${index}] deve ser um objeto`);
+    }
+    requireNonEmptyString(font.alias, `brandAssets.fonts[${index}].alias`);
+    requireNonEmptyString(font.family, `brandAssets.fonts[${index}].family`);
+    requireNonEmptyString(font.style, `brandAssets.fonts[${index}].style`);
+    if (!Number.isInteger(font.weight) || font.weight < 1 || font.weight > 1000) {
+      throw new TemplateManifestSchemaError(
+        `brandAssets.fonts[${index}].weight deve ser um inteiro entre 1 e 1000`
+      );
+    }
+  }
+}
+
 function validateManifest(manifest) {
   if (!isObject(manifest)) {
     throw new TemplateManifestSchemaError('manifest deve ser um objeto');
@@ -69,6 +93,7 @@ function validateManifest(manifest) {
     validateDimensions(format.dimensions, `formats.${formatId}.dimensions`);
   }
   validateThemes(manifest.themes);
+  validateBrandAssets(manifest.brandAssets);
   return manifest;
 }
 

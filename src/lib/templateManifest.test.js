@@ -114,5 +114,19 @@ describe('templateManifest', () => {
     });
     expect(normalized.formats.story.dimensions).toEqual({ width: 1080, height: 1920 });
     expect(normalized.dimensions).toEqual(normalized.formats.story.dimensions);
+    expect(normalized.brandAssets).toEqual({
+      logo: 'primary',
+      fonts: [
+        { alias: 'headline.black', family: 'Maga Black', weight: 900, style: 'normal' },
+        { alias: 'body.italic', family: 'Montserrat', weight: 400, style: 'italic' },
+      ],
+    });
+    expect(normalized).not.toHaveProperty('defaultLogo');
+  });
+
+  test('rejeita contrato incompleto de assets de marca', () => {
+    expect(() => validateManifest(editorialManifest({
+      brandAssets: { logo: 'primary', fonts: [{ alias: 'headline.black' }] },
+    }))).toThrow('brandAssets.fonts[0].family');
   });
 });

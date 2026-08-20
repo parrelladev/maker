@@ -5,6 +5,7 @@ function createDependencies({
   manifest = {},
   logoAsset = null,
   logoError = null,
+  brandAssetsResult = { resolvedLogo: null, fontCss: '' },
   directories = {},
   files = {},
 } = {}) {
@@ -32,11 +33,13 @@ function createDependencies({
     ? jest.fn().mockRejectedValue(logoError)
     : jest.fn().mockResolvedValue(logoAsset);
   const logger = { warn: jest.fn() };
+  const resolveRendererBrandAssetsFn = jest.fn().mockResolvedValue(brandAssetsResult);
 
   return {
     fileSystem,
     loadManifestFn,
     resolveLogoAssetFn,
+    resolveRendererBrandAssetsFn,
     logger,
     templateDir,
     pageDir,
@@ -133,6 +136,37 @@ describe('templatePageService', () => {
       manifest: {},
       css: [],
       resolvedLogo: null,
+    });
+    expect(deps.resolveLogoAssetFn).not.toHaveBeenCalled();
+  });
+
+  test('resolve aliases editoriais da marca e antepõe as fontes ao CSS do renderer', async () => {
+    const manifest = {
+      editorial: { brand: 'agazeta' },
+      brandAssets: {
+        logo: 'primary',
+        fonts: [{ alias: 'headline.black', family: 'Maga Black', weight: 900, style: 'normal' }],
+      },
+      bindings: [{ selector: '#title', type: 'text', field: 'h1' }],
+    };
+    const deps = createDependencies({
+      manifest,
+      brandAssetsResult: {
+        resolvedLogo: { kind: 'inline-svg', markup: '<svg></svg>' },
+        fontCss: '@font-face { font-family: "Maga Black"; }',
+      },
+      files: { [path.join('templates', 'fixture', 'index', 'index.html')]: '<main />' },
+    });
+    const { loadTemplatePage } = createTemplatePageService(deps);
+
+    await expect(loadTemplatePage('fixture', 'index')).resolves.toMatchObject({
+      manifest,
+      resolvedLogo: { kind: 'inline-svg', markup: '<svg></svg>' },
+      css: [{ name: 'brand-fonts.css', content: '@font-face { font-family: "Maga Black"; }' }],
+    });
+    expect(deps.resolveRendererBrandAssetsFn).toHaveBeenCalledWith({
+      brandId: 'agazeta',
+      brandAssets: manifest.brandAssets,
     });
     expect(deps.resolveLogoAssetFn).not.toHaveBeenCalled();
   });

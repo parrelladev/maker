@@ -106,15 +106,30 @@ describe('editorCatalog com filesystem e loaders reais', () => {
   test.each([
     [
       { brand: 'brand-a', family: 'padrao', variant: 'foto-acima', format: 'story' },
-      { template: 'brand-a-story', page: 'index' },
+      {
+        template: 'brand-a-story', page: 'index',
+        dimensions: { width: 1080, height: 1920 },
+        themes: [
+          { id: 'azul', label: 'Azul' },
+          { id: 'preto', label: 'Preto' },
+        ],
+      },
     ],
     [
       { brand: 'brand-a', family: 'padrao', variant: 'foto-acima', format: 'feed' },
-      { template: 'brand-a-feed', page: 'index' },
+      {
+        template: 'brand-a-feed', page: 'index',
+        dimensions: { width: 1080, height: 1350 },
+        themes: [{ id: 'paper', label: 'Paper' }],
+      },
     ],
     [
       { brand: 'thirdbrand', family: 'especial', variant: 'quote-card', format: 'square' },
-      { template: 'thirdbrand-square', page: 'index' },
+      {
+        template: 'thirdbrand-square', page: 'index',
+        dimensions: { width: 900, height: 900 },
+        themes: [{ id: 'green', label: 'Green' }],
+      },
     ],
   ])('resolve renderer descoberto por arquivos para %j', (selection, expected) => {
     expect(resolveRenderer(catalog, selection)).toEqual(expected);

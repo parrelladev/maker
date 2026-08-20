@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { loadManifest } = require('../lib/manifestLoader');
 const { resolveLogoAsset } = require('../lib/assetResolver');
+const { resolveRendererBrandAssets } = require('../lib/rendererBrandAssets');
 const {
   TemplateRemoteAssetError,
   TemplateRequiredFileUnreadableError,
@@ -12,6 +13,7 @@ function createTemplatePageService({
   pathModule = path,
   loadManifestFn = loadManifest,
   resolveLogoAssetFn = resolveLogoAsset,
+  resolveRendererBrandAssetsFn = resolveRendererBrandAssets,
   logger = console,
 } = {}) {
   async function readCssFrom(dir) {
@@ -95,7 +97,19 @@ function createTemplatePageService({
     const pageCss = await readCssFrom(manifestInfo.pageDir);
     const css = [...sharedCss, ...pageCss];
     const manifest = manifestInfo.manifest || {};
-    const resolvedLogo = await resolveManifestLogo(template, page, manifest);
+    let resolvedLogo;
+    if (manifest.brandAssets) {
+      const brandAssets = await resolveRendererBrandAssetsFn({
+        brandId: manifest.editorial.brand,
+        brandAssets: manifest.brandAssets,
+      });
+      resolvedLogo = brandAssets.resolvedLogo;
+      if (brandAssets.fontCss) {
+        css.unshift({ name: 'brand-fonts.css', content: brandAssets.fontCss });
+      }
+    } else {
+      resolvedLogo = await resolveManifestLogo(template, page, manifest);
+    }
 
     return {
       template,

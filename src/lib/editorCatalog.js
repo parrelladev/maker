@@ -21,8 +21,13 @@ function selectionKey({ brand, family, variant, format }) {
   return JSON.stringify([brand, family, variant, format]);
 }
 
-function rendererRef(template, page) {
-  return { template, page };
+function rendererRef(template, page, dimensions, themes) {
+  return {
+    template,
+    page,
+    dimensions: { ...dimensions },
+    themes: themes.map(theme => ({ ...theme })).sort(compareIds),
+  };
 }
 
 function compareRendererRefs(left, right) {
@@ -37,7 +42,9 @@ function conflict(code, message, selection, references, extra = {}) {
   throw new EditorCatalogError(code, message, {
     ...selection,
     ...extra,
-    references: [...references].sort(compareRendererRefs),
+    references: references
+      .map(({ template, page }) => ({ template, page }))
+      .sort(compareRendererRefs),
   });
 }
 
@@ -57,7 +64,7 @@ async function buildEditorCatalog({
       if (metadata === null) continue;
 
       const { brand, family, variant, label } = metadata.editorial;
-      const reference = rendererRef(templateEntry.template, pageEntry.name);
+      const baseReference = { template: templateEntry.template, page: pageEntry.name };
       let brandDetail = brandDetails.get(brand);
       if (!brandDetail) {
         try {
@@ -66,7 +73,7 @@ async function buildEditorCatalog({
           throw new EditorCatalogError(
             'EDITOR_CATALOG_UNKNOWN_BRAND',
             `Manifest editorial referencia marca desconhecida: ${brand}`,
-            { brand, reference, causeCode: error?.code }
+            { brand, reference: baseReference, causeCode: error?.code }
           );
         }
         brandDetails.set(brand, brandDetail);
@@ -82,14 +89,14 @@ async function buildEditorCatalog({
 
       let variantNode = familyNode.variants.get(variant);
       if (!variantNode) {
-        variantNode = { id: variant, label, formats: new Map(), reference };
+        variantNode = { id: variant, label, formats: new Map(), reference: baseReference };
         familyNode.variants.set(variant, variantNode);
       } else if (variantNode.label !== label) {
         conflict(
           'EDITOR_CATALOG_VARIANT_LABEL_CONFLICT',
           `Labels conflitantes para ${brand}/${family}/${variant}`,
           { brand, family, variant },
-          [variantNode.reference, reference],
+          [variantNode.reference, baseReference],
           { labels: [variantNode.label, label].sort() }
         );
       }
@@ -97,6 +104,12 @@ async function buildEditorCatalog({
       for (const [format, formatMetadata] of Object.entries(metadata.formats)) {
         const selection = { brand, family, variant, format };
         const key = selectionKey(selection);
+        const reference = rendererRef(
+          templateEntry.template,
+          pageEntry.name,
+          formatMetadata.dimensions,
+          metadata.themes
+        );
         const existing = rendererIndex.get(key);
         if (existing && !sameRendererRef(existing, reference)) {
           conflict(
@@ -153,7 +166,12 @@ function resolveRenderer(catalog, selection) {
       { ...selection }
     );
   }
-  return { ...reference };
+  return {
+    template: reference.template,
+    page: reference.page,
+    dimensions: { ...reference.dimensions },
+    themes: reference.themes.map(theme => ({ ...theme })),
+  };
 }
 
 module.exports = {

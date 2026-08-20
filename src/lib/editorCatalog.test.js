@@ -166,9 +166,24 @@ describe('editorCatalog', () => {
     const catalog = await build([page('renderer-a', 'story-page', manifest())]);
     const selection = { brand: 'brand-a', family: 'padrao', variant: 'foto-acima', format: 'story' };
     const first = resolveRenderer(catalog, selection);
-    expect(first).toEqual({ template: 'renderer-a', page: 'story-page' });
+    expect(first).toEqual({
+      template: 'renderer-a',
+      page: 'story-page',
+      dimensions: { width: 1080, height: 1920 },
+      themes: [
+        { id: 'azul', label: 'Azul' },
+      ],
+    });
     first.template = 'alterado';
-    expect(resolveRenderer(catalog, selection)).toEqual({ template: 'renderer-a', page: 'story-page' });
+    first.dimensions.width = 1;
+    expect(resolveRenderer(catalog, selection)).toEqual({
+      template: 'renderer-a',
+      page: 'story-page',
+      dimensions: { width: 1080, height: 1920 },
+      themes: [
+        { id: 'azul', label: 'Azul' },
+      ],
+    });
   });
 
   test('rejeita resolução inexistente sem fallback', async () => {
