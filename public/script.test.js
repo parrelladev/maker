@@ -120,6 +120,7 @@ function createHarness({ autoResolveRuntime = true } = {}) {
     'previewPlaceholder'
   ];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id)]));
+  elements.themeOptions = new FakeElement('themeOptions');
   const frameDocument = {
     open: jest.fn(),
     write: jest.fn(),
@@ -135,11 +136,15 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   const documentListeners = {};
   const document = {
     getElementById: id => elements[id] || null,
-    querySelector: selector => (
-      selector === '.preview-frame-wrapper'
-        ? new FakeElement('preview-frame-wrapper')
-        : null
-    ),
+    querySelector: selector => {
+      if (selector === '.preview-frame-wrapper') {
+        return new FakeElement('preview-frame-wrapper');
+      }
+      if (selector === '[data-control="themes"]') {
+        return elements.themeOptions;
+      }
+      return null;
+    },
     createElement: () => new FakeElement(),
     addEventListener(type, listener) {
       documentListeners[type] = documentListeners[type] || [];
@@ -772,6 +777,17 @@ describe('runtime de bindings carregado por public/script.js', () => {
 });
 
 describe('contrato de estado de public/script.js', () => {
+  test('inicialização oculta apenas o controle legado e preserva as opções visuais de tema', () => {
+    const harness = createHarness();
+
+    const themeOptions = harness.context.document.querySelector('[data-control="themes"]');
+
+    expect(harness.elements.themeWrapper.style.display).toBe('none');
+    expect(harness.elements.customTheme).toBeDefined();
+    expect(themeOptions).toBe(harness.elements.themeOptions);
+    expect(themeOptions.style.display).not.toBe('none');
+  });
+
   test('lê um snapshot normalizado dos dados atuais do formulário de geração', () => {
     const harness = createHarness();
     harness.run(`openModal('layout-hz')`);

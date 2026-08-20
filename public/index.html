@@ -1,125 +1,110 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maker</title>
-    <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link rel="shortcut icon" href="favicon.svg" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maker</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <link rel="shortcut icon" href="favicon.svg">
 </head>
-
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <img src="logo-maker.png" alt="Logo ArtMaker" class="logo">
-        </header>
+  <div class="editor-app">
+    <header class="editor-header">
+      <a class="editor-brand" href="/" aria-label="Maker — página inicial"><img src="logo-maker.png" alt="Maker" class="editor-logo"></a>
+      <button class="button button-secondary" type="button" id="newArtworkBtn" data-action="new-artwork">Nova arte</button>
+    </header>
 
-        <main class="stories-section">
-            <nav class="category-tabs" id="storyCategoryTabs" aria-label="Agrupamentos de templates"></nav>
+    <main class="editor-main">
+      <aside class="editor-sidebar" aria-labelledby="editorSidebarTitle">
+        <h1 id="editorSidebarTitle">Conteúdo da arte</h1>
 
-            <section class="templates-grid story-grid" id="storyTemplateGrid" aria-live="polite"></section>
-        </main>
+        <section class="editor-section" aria-labelledby="contentSectionTitle">
+          <h2 id="contentSectionTitle">Conteúdo</h2>
+          <div class="field-group">
+            <label for="newsUrl">URL da notícia</label>
+            <input type="url" id="newsUrl" data-field="url" placeholder="Cole o link da notícia" autocomplete="url" required>
+          </div>
+          <button class="button button-primary button-full" type="button" id="fetchDataBtn" data-action="import-news">Importar notícia</button>
+        </section>
 
-        <!-- Modal -->
-        <div class="modal" id="templateModal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2 id="modalTitle">Gerar Arte</h2>
-                    <button class="close-btn" id="closeModal">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <div class="modal-body-inner">
-                        <div class="modal-form-column">
-                            <div class="form-group required" id="themeWrapper" style="display: none;">
-                                <label for="customTheme" class="required-label">
-                                    <span>Tema</span>
-                                </label>
-                                <select id="customTheme" required></select>
-                                <div class="form-help">Altere apenas as cores do layout escolhido.</div>
-                            </div>
-                            <div class="form-group required">
-                                <label for="newsUrl" class="required-label">
-                                    <span>Link da Notícia</span>
-                                </label>
-                                <input type="url" id="newsUrl" placeholder="Cole aqui o link da notícia..." required>
-                            </div>
-
-                            <div class="form-actions-row form-actions-row-inline">
-                                <button class="btn btn-secondary" type="button" id="fetchDataBtn">
-                                    <i class="fas fa-search"></i>
-                                    Buscar dados da matéria
-                                </button>
-
-                                <button class="btn btn-primary" id="generateBtn">
-                                    <i class="fas fa-magic"></i>
-                                    Criar
-                                </button>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="customTag">Chapéu manual</label>
-                                <input type="text" id="customTag"
-                                    placeholder="Deixe vazio para usar o chapéu da notícia">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="customTitle">Título manual</label>
-                                <input type="text" id="customTitle"
-                                    placeholder="Deixe vazio para usar o título da notícia">
-                            </div>
-                            <div class="form-group">
-                                <label for="customSubtitle">Subtítulo manual</label>
-                                <input type="text" id="customSubtitle"
-                                    placeholder="Deixe vazio para usar o subtítulo da notícia">
-                            </div>
-                            <div class="form-group">
-                                <label for="customImageUrl">Imagem manual</label>
-                                <input type="url" id="customImageUrl"
-                                    placeholder="Cole um link de imagem para substituir a foto automática">
-                            </div>
-                        </div>
-
-                        <div class="modal-preview-column">
-                            <div class="preview-container">
-                                <div class="preview-frame-wrapper">
-                                    <iframe id="previewFrame" title="Prévia da arte" class="preview-frame"
-                                        loading="lazy"></iframe>
-                                    <div class="preview-placeholder" id="previewPlaceholder">
-                                        <p>Use o link da notícia e o botão <strong>Buscar dados da matéria</strong> para
-                                            montar uma prévia visual aqui.</p>
-                                        <p>Você também pode ajustar os campos manualmente; o preview será atualizado
-                                            conforme você digitar.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <section class="editor-section" aria-labelledby="configurationSectionTitle">
+          <h2 id="configurationSectionTitle">Configuração</h2>
+          <div class="field-group">
+            <label for="brandControl">Marca</label>
+            <select id="brandControl" data-control="brand" disabled><option>Carregando...</option></select>
+          </div>
+          <div class="field-group">
+            <label for="familyControl">Família</label>
+            <select id="familyControl" data-control="family" disabled><option>Selecione...</option></select>
+          </div>
+          <fieldset class="choice-group">
+            <legend>Variante</legend>
+            <div class="variant-grid" data-control="variants" aria-live="polite"><p class="control-placeholder">As variantes aparecerão aqui.</p></div>
+          </fieldset>
+          <fieldset class="choice-group">
+            <legend>Tema</legend>
+            <div class="theme-options" data-control="themes" aria-live="polite"><p class="control-placeholder">Os temas aparecerão aqui.</p></div>
+            <div class="legacy-theme-control visually-hidden" id="themeWrapper" aria-hidden="true">
+              <label for="customTheme">Tema legado</label>
+              <select id="customTheme" data-control="theme" tabindex="-1"></select>
             </div>
-        </div>
+          </fieldset>
+        </section>
 
-        <!-- Loading Overlay -->
-        <div class="loading-overlay" id="loadingOverlay">
-            <div class="loading-content">
-                <i class="fas fa-spinner fa-spin"></i>
-                <p>Criando sua arte...</p>
+        <section class="editor-section" aria-labelledby="textSectionTitle">
+          <h2 id="textSectionTitle">Texto</h2>
+          <div class="field-group"><label for="customTag">Categoria / Chapéu</label><input type="text" id="customTag" data-field="tag" placeholder="Usar texto importado"></div>
+          <div class="field-group"><label for="customTitle">Título</label><textarea id="customTitle" data-field="title" rows="3" placeholder="Usar título importado"></textarea></div>
+          <div class="field-group"><label for="customSubtitle">Subtítulo</label><textarea id="customSubtitle" data-field="subtitle" rows="3" placeholder="Usar subtítulo importado"></textarea></div>
+        </section>
+
+        <section class="editor-section" aria-labelledby="imageSectionTitle">
+          <h2 id="imageSectionTitle">Imagem</h2>
+          <div class="current-image" data-current-image><span aria-hidden="true">Imagem</span><p>Nenhuma imagem selecionada</p></div>
+          <div class="field-group"><label for="customImageUrl">URL da imagem</label><input type="url" id="customImageUrl" data-field="image" placeholder="Usar imagem importada"></div>
+          <button class="button button-secondary button-full" type="button" data-action="replace-image">Trocar imagem</button>
+        </section>
+      </aside>
+
+      <section class="editor-workspace" id="templateModal" aria-labelledby="workspaceTitle">
+        <div class="workspace-heading">
+          <div><p class="workspace-eyebrow">Formato</p><h2 id="workspaceTitle">Preview</h2></div>
+          <div class="view-mode-toolbar" role="group" aria-label="Modo de visualização">
+            <button type="button" data-view-mode="feed" aria-pressed="false">Feed</button>
+            <button type="button" class="is-active" data-view-mode="story" aria-pressed="true">Story</button>
+            <button type="button" data-view-mode="compare" aria-pressed="false">Comparar</button>
+          </div>
+        </div>
+        <div class="preview-stage">
+          <div class="preview-container">
+            <div class="preview-frame-wrapper" data-preview-viewport>
+              <iframe id="previewFrame" title="Prévia da arte" class="preview-frame" loading="lazy"></iframe>
+              <div class="preview-placeholder" id="previewPlaceholder"><strong>Sua arte aparecerá aqui</strong><p>Importe uma notícia para montar o preview no renderer real.</p></div>
             </div>
+          </div>
         </div>
+        <h2 class="visually-hidden" id="modalTitle">Gerar arte</h2>
+        <button class="visually-hidden" type="button" id="closeModal" tabindex="-1">Fechar</button>
+      </section>
+    </main>
 
-        <!-- Toast Notifications -->
-        <div class="toast-container" id="toastContainer"></div>
-    </div>
+    <footer class="editor-footer">
+      <div class="editor-status" data-editor-status role="status" aria-live="polite"><span class="status-indicator" aria-hidden="true"></span><span>Pronto</span></div>
+      <div class="footer-actions">
+        <button class="button button-secondary" type="button" data-action="download-all" disabled>Baixar ambos</button>
+        <button class="button button-primary" type="button" id="generateBtn" data-action="download-current">Baixar atual</button>
+      </div>
+    </footer>
+  </div>
 
-    <script src="js/api.js"></script>
-    <script src="js/preview-export.js"></script>
-    <script src="js/frontend-utils.js"></script>
-    <script src="script.js"></script>
+  <section class="legacy-template-catalog" aria-hidden="true" hidden><nav id="storyCategoryTabs" aria-label="Agrupamentos de templates legados"></nav><div id="storyTemplateGrid"></div></section>
+  <div class="loading-overlay" id="loadingOverlay" aria-live="polite" aria-label="Processando"><div class="loading-content"><span class="loading-spinner" aria-hidden="true"></span><p>Criando sua arte...</p></div></div>
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+  <script src="js/api.js"></script>
+  <script src="js/preview-export.js"></script>
+  <script src="js/frontend-utils.js"></script>
+  <script src="script.js"></script>
 </body>
-
 </html>

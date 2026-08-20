@@ -1,5 +1,21 @@
 # Arquitetura atual do Maker
 
+## Shell do editor em tela única
+
+A interface principal em `public/index.html` usa um shell de tela única com
+header, sidebar de edição, workspace e barra inferior de status e exportação. O
+preview ocupa a área dominante do workspace e conserva o `iframe` real usado
+pelo renderer e pela exportação; não existe um mock visual intermediário. O
+viewport ao redor do iframe é dimensionável e prepara a interface para outras
+proporções, embora Story permaneça o único modo funcional nesta etapa.
+
+O modal deixou de ser a arquitetura principal. IDs ainda consumidos por
+`public/script.js` foram preservados no shell para uma transição incremental,
+assim como containers legados de catálogo isolados e não visíveis. Os controles
+de marca, família, variante e tema são apenas estruturas vazias nesta fase:
+integração com `publication`, Brand Registry e `editorCatalog`, assim como Feed,
+Comparar e Baixar ambos, permanece para as próximas etapas.
+
 Este documento descreve a arquitetura observada no código atual. Ele registra o
 comportamento existente; não define uma arquitetura-alvo.
 
