@@ -1,6 +1,21 @@
 {
   "name": "Layout horizontal - index",
-  "dimensions": { "width": 1080, "height": 1920 },
+  "editor": {
+    "brand": "agazeta",
+    "family": "padrao",
+    "variant": "foto-acima",
+    "label": "Foto acima"
+  },
+  "formats": {
+    "story": {
+      "dimensions": { "width": 1080, "height": 1920 }
+    }
+  },
+  "themes": [
+    { "id": "azul", "label": "Azul" },
+    { "id": "branco", "label": "Branco" },
+    { "id": "preto", "label": "Preto" }
+  ],
   "logoField": "logo",
   "defaultLogo": "logo-a-gazeta.svg",
   "bindings": [

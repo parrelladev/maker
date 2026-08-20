@@ -34,6 +34,40 @@ marca; composição pertence à variante; dimensões pertencem ao formato; tema
 não deve ser confundido com identidade estrutural. Os templates existentes
 continuam usando seus assets atuais até uma migração posterior e incremental.
 
+## Schema editorial dos manifests (fundacional)
+
+O manifest continua sendo o contrato técnico declarativo do renderer e pode
+também declarar sua posição no domínio editorial segundo a hierarquia:
+
+```text
+Marca → Família → Variante → Formato → Tema
+```
+
+- **Marca** identifica a identidade e os assets mantidos pelo Brand Registry.
+- **Família** identifica uma linguagem gráfica dentro da marca.
+- **Variante** identifica a composição estrutural/editorial.
+- **Formato** identifica dimensões e canal; seus IDs são abertos a extensões.
+- **Tema** identifica aparência, principalmente cor, sem criar outra variante.
+
+Manifests editoriais usam `editor` com `brand`, `family`, `variant` e `label`,
+um objeto não vazio `formats`, cujas entradas possuem `dimensions`, e podem
+declarar `themes` como objetos `{ id, label }`. A marca é apenas referenciada
+por ID: nomes, logos, fontes e paths continuam pertencendo ao Brand Registry.
+
+`src/lib/templateManifest.js` valida e normaliza esse contrato sem consultar o
+filesystem nem manter enums de famílias, variantes ou formatos. A representação
+normalizada expõe `editorial`, `formats` e `themes`. Para um único formato,
+também deriva `dimensions` em memória para os consumidores técnicos atuais;
+`formats` prevalece caso o arquivo contenha também a propriedade legada. Com
+múltiplos formatos não há escolha implícita e `dimensions` não é derivada.
+
+Manifests sem `editor` são legados e continuam válidos, com `editorial: null` e
+suas `dimensions` originais. Essa compatibilidade permite migração incremental.
+O path físico do template não define marca, família, variante ou formato: a
+identidade vem exclusivamente dos metadados. Um mesmo renderer técnico pode,
+portanto, declarar vários formatos e temas sem que a organização de arquivos
+se torne parte do domínio.
+
 ## Finalidade da aplicação
 
 O Maker é uma aplicação web para produzir artes PNG a partir de templates

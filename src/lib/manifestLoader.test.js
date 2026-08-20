@@ -93,4 +93,15 @@ describe('manifestLoader', () => {
       manifest: { name },
     });
   });
+
+  test('continua aceitando template legado e expõe editorial nulo', async () => {
+    const { loadManifest } = require('./manifestLoader');
+
+    await expect(loadManifest('fixture', 'valid')).resolves.toMatchObject({
+      manifest: {
+        editorial: null,
+        dimensions: { width: 320, height: 480 },
+      },
+    });
+  });
 });

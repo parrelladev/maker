@@ -5,6 +5,10 @@ const {
   TemplateNotFoundError,
   TemplateRequiredFileUnreadableError,
 } = require('./templatePageErrors');
+const {
+  normalizeManifest,
+  TemplateManifestSchemaError,
+} = require('./templateManifest');
 
 const TEMPLATE_ROOT = path.resolve('templates');
 
@@ -100,9 +104,9 @@ async function loadManifest(template, page) {
 
   let manifest;
   try {
-    manifest = await readJson(manifestPath);
+    manifest = normalizeManifest(await readJson(manifestPath));
   } catch (error) {
-    if (error instanceof SyntaxError) {
+    if (error instanceof SyntaxError || error instanceof TemplateManifestSchemaError) {
       throw new TemplateManifestInvalidError('Manifesto inválido', { cause: error });
     }
     throw new TemplateRequiredFileUnreadableError('Manifesto ilegível', { cause: error });
@@ -160,7 +164,7 @@ async function inspectTemplateCatalog() {
       }
 
       try {
-        const manifest = await readJson(manifestPath);
+        const manifest = normalizeManifest(await readJson(manifestPath));
         pages.push({
           name: pageName,
           manifest,
@@ -168,7 +172,7 @@ async function inspectTemplateCatalog() {
           htmlPath,
         });
       } catch (error) {
-        if (!(error instanceof SyntaxError)) {
+        if (!(error instanceof SyntaxError || error instanceof TemplateManifestSchemaError)) {
           throw error;
         }
         diagnostics.push({
