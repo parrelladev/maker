@@ -4,6 +4,7 @@ const https = require('https');
 const path = require('path');
 const { fork } = require('child_process');
 const { callbackify } = require('util');
+const { EventEmitter } = require('events');
 const axios = require('axios');
 const {
   SafeHttpError,
@@ -167,6 +168,229 @@ describe('safeHttpClient', () => {
     ]);
     expect(resolveHostname).toHaveBeenCalledTimes(1);
     expect(config.proxy).toBe(false);
+  });
+
+  test('tenta o proximo endereco publico validado apos falha de conexao', async () => {
+    const addresses = [
+      { address: '93.184.216.34', family: 4 },
+      { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+    ];
+    const httpClient = {
+      get: jest.fn()
+        .mockRejectedValueOnce(Object.assign(new Error('connect failed'), { code: 'ENETUNREACH' }))
+        .mockResolvedValueOnce(response('fallback-ok')),
+    };
+    const resolveHostname = jest.fn().mockResolvedValue(addresses);
+    const isAddressAllowed = jest.fn().mockReturnValue(true);
+    const client = createSafeHttpClient({ httpClient, resolveHostname, isAddressAllowed });
+
+    await expect(client.get('https://example.com/file', requestOptions))
+      .resolves.toMatchObject({ data: 'fallback-ok' });
+
+    expect(isAddressAllowed.mock.calls.map(([address]) => address)).toEqual(
+      addresses.map(({ address }) => address)
+    );
+    expect(httpClient.get).toHaveBeenCalledTimes(2);
+    await expect(httpClient.get.mock.calls[0][1].lookup('example.com', {}))
+      .resolves.toEqual(addresses[0]);
+    await expect(httpClient.get.mock.calls[1][1].lookup('example.com', {}))
+      .resolves.toEqual(addresses[1]);
+    expect(resolveHostname).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejeita resolucao mista antes de tentar endereco privado', async () => {
+    const httpClient = { get: jest.fn() };
+    const resolveHostname = jest.fn().mockResolvedValue([
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.10', family: 4 },
+    ]);
+    const client = createSafeHttpClient({ httpClient, resolveHostname });
+
+    await expect(client.get('https://example.com/file', requestOptions))
+      .rejects.toMatchObject({ code: 'BLOCKED_ADDRESS' });
+    expect(httpClient.get).not.toHaveBeenCalled();
+  });
+
+  test('nao faz fallback para erro HTTP', async () => {
+    const { client, httpClient } = createHarness([
+      { address: '93.184.216.34', family: 4 },
+      { address: '93.184.216.35', family: 4 },
+    ]);
+    httpClient.get.mockRejectedValue(
+      Object.assign(new Error('status 503'), { response: { status: 503 } })
+    );
+
+    await expect(client.get('https://example.com/file', requestOptions))
+      .rejects.toMatchObject({ code: 'HTTP_STATUS', status: 503 });
+    expect(httpClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  test('mantem um unico budget quando a resposta consome toda a deadline', async () => {
+    const httpClient = { get: jest.fn(() => new Promise(() => {})) };
+    const resolveHostname = jest.fn().mockResolvedValue([
+      { address: '93.184.216.34', family: 4 },
+      { address: '93.184.216.35', family: 4 },
+      { address: '93.184.216.36', family: 4 },
+    ]);
+    const client = createSafeHttpClient({ httpClient, resolveHostname });
+    const startedAt = performance.now();
+
+    await expect(client.get('https://example.com/file', {
+      ...requestOptions,
+      timeout: 60,
+    })).rejects.toMatchObject({ code: 'TIMEOUT' });
+
+    expect(performance.now() - startedAt).toBeLessThan(150);
+    expect(httpClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  test('limita somente a conexao ruim e alcanca o proximo candidato rapidamente', async () => {
+    jest.useFakeTimers();
+    try {
+      const sockets = [new EventEmitter(), new EventEmitter()];
+      sockets.forEach((socket) => {
+        socket.destroy = (error) => socket.emit('error', error);
+      });
+      const createTcpConnection = jest.fn()
+        .mockReturnValueOnce(sockets[0])
+        .mockReturnValueOnce(sockets[1]);
+      const httpClient = {
+        get: jest.fn((_, config) => new Promise((resolve, reject) => {
+          const socket = config.httpAgent.createConnection({});
+          socket.once('error', reject);
+          if (httpClient.get.mock.calls.length === 2) {
+            socket.emit('connect');
+            resolve(response('fast-fallback'));
+          }
+        })),
+      };
+      const client = createSafeHttpClient({
+        httpClient,
+        createTcpConnection,
+        connectTimeoutMs: 1000,
+        resolveHostname: jest.fn().mockResolvedValue([
+          { address: '93.184.216.34', family: 4 },
+          { address: '93.184.216.35', family: 4 },
+        ]),
+        now: () => Date.now(),
+      });
+
+      const result = client.get('http://example.com/file', {
+        ...requestOptions,
+        timeout: 10000,
+      });
+      await jest.advanceTimersByTimeAsync(999);
+      expect(httpClient.get).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+
+      await expect(result).resolves.toMatchObject({ data: 'fast-fallback' });
+      expect(httpClient.get).toHaveBeenCalledTimes(2);
+      expect(createTcpConnection).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('apos conectar permite que a transferencia use o restante do budget global', async () => {
+    jest.useFakeTimers();
+    try {
+      const socket = new EventEmitter();
+      socket.destroy = (error) => socket.emit('error', error);
+      const httpClient = {
+        get: jest.fn((_, config) => new Promise((resolve, reject) => {
+          const connectedSocket = config.httpAgent.createConnection({});
+          connectedSocket.once('error', reject);
+          connectedSocket.emit('connect');
+          setTimeout(() => resolve(response('slow-body-ok')), 1500);
+        })),
+      };
+      const client = createSafeHttpClient({
+        httpClient,
+        createTcpConnection: jest.fn().mockReturnValue(socket),
+        connectTimeoutMs: 1000,
+        resolveHostname: jest.fn().mockResolvedValue(publicAddresses),
+        now: () => Date.now(),
+      });
+
+      const result = client.get('http://example.com/file', {
+        ...requestOptions,
+        timeout: 5000,
+      });
+      await jest.advanceTimersByTimeAsync(1500);
+
+      await expect(result).resolves.toMatchObject({ data: 'slow-body-ok' });
+      expect(httpClient.get).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('intercala familias e nao espera o segundo IPv6 antes do IPv4 saudavel', async () => {
+    const addresses = [
+      { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+      { address: '2606:2800:220:1:248:1893:25c8:1947', family: 6 },
+      { address: '93.184.216.34', family: 4 },
+    ];
+    const httpClient = {
+      get: jest.fn()
+        .mockRejectedValueOnce(Object.assign(new Error('IPv6 unreachable'), { code: 'ENETUNREACH' }))
+        .mockResolvedValueOnce(response('ipv4-ok')),
+    };
+    const client = createSafeHttpClient({
+      httpClient,
+      resolveHostname: jest.fn().mockResolvedValue(addresses),
+      isAddressAllowed: jest.fn().mockReturnValue(true),
+    });
+
+    await expect(client.get('https://example.com/file', requestOptions))
+      .resolves.toMatchObject({ data: 'ipv4-ok' });
+    await expect(httpClient.get.mock.calls[0][1].lookup('example.com', {}))
+      .resolves.toEqual(addresses[0]);
+    await expect(httpClient.get.mock.calls[1][1].lookup('example.com', {}))
+      .resolves.toEqual(addresses[2]);
+    expect(httpClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  test('preserva IPv6 funcional como primeiro candidato', async () => {
+    const addresses = [
+      { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+      { address: '93.184.216.34', family: 4 },
+    ];
+    const { client, httpClient } = createHarness(addresses);
+
+    await expect(client.get('https://example.com/file', requestOptions))
+      .resolves.toMatchObject({ data: 'ok' });
+    await expect(httpClient.get.mock.calls[0][1].lookup('example.com', {}))
+      .resolves.toEqual(addresses[0]);
+    expect(httpClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  test('redirect resolve e fixa somente os candidatos do novo hostname', async () => {
+    const addressesByHost = {
+      'origin.example': [{ address: '93.184.216.34', family: 4 }],
+      'cdn.example': [{ address: '93.184.216.35', family: 4 }],
+    };
+    const resolveHostname = jest.fn(hostname => Promise.resolve(addressesByHost[hostname]));
+    const httpClient = {
+      get: jest.fn()
+        .mockResolvedValueOnce(response('', 302, { location: 'https://cdn.example/image' }))
+        .mockResolvedValueOnce(response('image')),
+    };
+    const client = createSafeHttpClient({ httpClient, resolveHostname });
+
+    await expect(client.get('https://origin.example/start', requestOptions))
+      .resolves.toMatchObject({ data: 'image' });
+
+    expect(resolveHostname.mock.calls.map(([hostname]) => hostname)).toEqual([
+      'origin.example',
+      'cdn.example',
+    ]);
+    await expect(httpClient.get.mock.calls[0][1].lookup('origin.example', {}))
+      .resolves.toEqual(addressesByHost['origin.example'][0]);
+    await expect(httpClient.get.mock.calls[1][1].lookup('cdn.example', {}))
+      .resolves.toEqual(addressesByHost['cdn.example'][0]);
+    await expect(httpClient.get.mock.calls[1][1].lookup('origin.example', {}))
+      .rejects.toMatchObject({ code: 'BLOCKED_ADDRESS' });
   });
 
   test.each([

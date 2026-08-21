@@ -2,6 +2,7 @@ const dns = require('dns');
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const tls = require('tls');
 const { performance } = require('perf_hooks');
 const axios = require('axios');
 
@@ -229,13 +230,94 @@ function classifyRequestError(error) {
   return new SafeHttpError('REQUEST_FAILED', { cause: error });
 }
 
+const FALLBACK_TRANSPORT_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ECONNABORTED',
+]);
+const DEFAULT_CONNECT_TIMEOUT_MS = 1000;
+
+function findFallbackTransportCode(error) {
+  let current = error;
+  while (current) {
+    if (FALLBACK_TRANSPORT_ERROR_CODES.has(current.code)) return current.code;
+    current = current.cause;
+  }
+  return null;
+}
+
+function canFallbackToNextAddress(error) {
+  const safeError = findSafeHttpError(error);
+  if ((safeError && safeError.code !== 'TIMEOUT') || error?.response) return false;
+  if (safeError?.code === 'TIMEOUT') return true;
+  return Boolean(findFallbackTransportCode(error));
+}
+
+function interleaveAddressFamilies(addresses) {
+  if (addresses.length < 2) return addresses;
+
+  const firstFamily = addresses[0].family;
+  const preferred = addresses.filter((entry) => entry.family === firstFamily);
+  const alternate = addresses.filter((entry) => entry.family !== firstFamily);
+  const ordered = [];
+
+  while (preferred.length || alternate.length) {
+    if (preferred.length) ordered.push(preferred.shift());
+    if (alternate.length) ordered.push(alternate.shift());
+  }
+  return ordered;
+}
+
+function connectWithTimeout(connect, connectOptions, readyEvent, timeoutMs) {
+  const socket = connect(connectOptions);
+  const clearConnectTimer = () => clearTimeout(timer);
+  const timer = setTimeout(() => {
+    const error = new Error('Tempo limite de conexÃ£o excedido');
+    error.code = 'ETIMEDOUT';
+    socket.destroy(error);
+  }, timeoutMs);
+  timer.unref?.();
+  socket.once(readyEvent, clearConnectTimer);
+  socket.once('error', clearConnectTimer);
+  socket.once('close', clearConnectTimer);
+  return socket;
+}
+
+function createConnectionLimitedAgent(AgentClass, connect, readyEvent, connectTimeoutMs) {
+  const agent = new AgentClass({ keepAlive: false });
+  agent.createConnection = (connectOptions) => connectWithTimeout(
+    connect,
+    connectOptions,
+    readyEvent,
+    connectTimeoutMs
+  );
+  return agent;
+}
+
 function createSafeHttpClient({
   httpClient = axios,
   resolveHostname = (hostname) => dns.promises.lookup(hostname, { all: true, verbatim: true }),
   isAddressAllowed = isPublicIp,
   now = () => performance.now(),
-  createHttpAgent = () => new http.Agent({ keepAlive: false }),
-  createHttpsAgent = () => new https.Agent({ keepAlive: false }),
+  connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+  createTcpConnection = (options) => net.createConnection(options),
+  createTlsConnection = (options) => tls.connect(options),
+  createHttpAgent = ({ timeoutMs }) => createConnectionLimitedAgent(
+    http.Agent,
+    createTcpConnection,
+    'connect',
+    timeoutMs
+  ),
+  createHttpsAgent = ({ timeoutMs }) => createConnectionLimitedAgent(
+    https.Agent,
+    createTlsConnection,
+    'secureConnect',
+    timeoutMs
+  ),
 } = {}) {
   function getRemainingTime(deadline) {
     const remainingMs = deadline - now();
@@ -305,10 +387,10 @@ function createSafeHttpClient({
     if (normalizedAddresses.some((entry) => !isAddressAllowed(entry.address))) {
       throw new SafeHttpError('BLOCKED_ADDRESS');
     }
-    return normalizedAddresses;
+    return interleaveAddressFamilies(normalizedAddresses);
   }
 
-  function createPinnedLookup(expectedHostname, validatedAddresses) {
+  function createPinnedLookup(expectedHostname, validatedAddress) {
     return async (hostname, lookupOptions = {}) => {
       const normalized = normalizeHostname(hostname);
       if (normalized !== expectedHostname) {
@@ -316,16 +398,56 @@ function createSafeHttpClient({
       }
 
       const requestedFamily = Number(lookupOptions.family) || 0;
-      const candidates = requestedFamily
-        ? validatedAddresses.filter((entry) => entry.family === requestedFamily)
-        : validatedAddresses;
-      if (!candidates.length) {
+      if (requestedFamily && validatedAddress.family !== requestedFamily) {
         throw new SafeHttpError('DNS_ERROR');
       }
 
-      const result = candidates.map(({ address, family }) => ({ address, family }));
-      return lookupOptions.all ? result : result[0];
+      const result = {
+        address: validatedAddress.address,
+        family: validatedAddress.family,
+      };
+      return lookupOptions.all ? [result] : result;
     };
+  }
+
+  async function requestValidatedHop(currentUrl, hostname, validatedAddresses, options, deadline) {
+    let lastError;
+
+    for (let index = 0; index < validatedAddresses.length; index += 1) {
+      const remainingMs = getRemainingTime(deadline);
+      const attemptMs = remainingMs;
+      const connectionWindowMs = Math.min(connectTimeoutMs, remainingMs);
+      const httpAgent = createHttpAgent({ timeoutMs: connectionWindowMs });
+      const httpsAgent = createHttpsAgent({ timeoutMs: connectionWindowMs });
+
+      try {
+        return await withDeadline(
+          Promise.resolve().then(() =>
+            httpClient.get(currentUrl.href, {
+              headers: options.headers,
+              responseType: options.responseType || 'text',
+              timeout: Math.max(1, Math.ceil(attemptMs)),
+              maxContentLength: options.maxBytes,
+              maxBodyLength: options.maxBytes,
+              maxRedirects: 0,
+              validateStatus: (status) => status >= 200 && status < 400,
+              lookup: createPinnedLookup(hostname, validatedAddresses[index]),
+              httpAgent,
+              httpsAgent,
+              proxy: false,
+            })
+          ),
+          attemptMs
+        );
+      } catch (error) {
+        lastError = error;
+        if (index === validatedAddresses.length - 1 || !canFallbackToNextAddress(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   async function get(value, options = {}) {
@@ -353,26 +475,12 @@ function createSafeHttpClient({
         getRemainingTime(deadline);
         const hostname = normalizeHostname(currentUrl.hostname);
         const validatedAddresses = await resolvePublicAddresses(hostname, deadline);
-        const remainingMs = getRemainingTime(deadline);
-        const httpAgent = createHttpAgent();
-        const httpsAgent = createHttpsAgent();
-        const response = await withDeadline(
-          Promise.resolve().then(() =>
-            httpClient.get(currentUrl.href, {
-              headers: options.headers,
-              responseType: options.responseType || 'text',
-              timeout: Math.max(1, Math.ceil(remainingMs)),
-              maxContentLength: maxBytes,
-              maxBodyLength: maxBytes,
-              maxRedirects: 0,
-              validateStatus: (status) => status >= 200 && status < 400,
-              lookup: createPinnedLookup(hostname, validatedAddresses),
-              httpAgent,
-              httpsAgent,
-              proxy: false,
-            })
-          ),
-          remainingMs
+        const response = await requestValidatedHop(
+          currentUrl,
+          hostname,
+          validatedAddresses,
+          { ...options, maxBytes },
+          deadline
         );
         getRemainingTime(deadline);
 

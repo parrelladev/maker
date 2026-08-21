@@ -590,6 +590,31 @@ describe('controller/UI editorial', () => {
     expect(harness.controller.getPublication().content.title).toBe('Titulo manual posterior');
   });
 
+  test('falha da API de importacao preserva publication e preview anteriores', async () => {
+    const importNews = jest.fn().mockRejectedValue(new Error('image timeout'));
+    const harness = setup({ legacyBridge: { importNews } });
+    await harness.controller.initialize();
+    for (const [index, value] of [
+      [0, 'https://example.com/news'],
+      [1, 'Titulo anterior'],
+      [2, 'Subtitulo anterior'],
+      [3, 'Tag anterior'],
+      [4, 'https://example.com/anterior.jpg'],
+    ]) {
+      harness.fields[index].value = value;
+      await harness.fields[index].dispatch('input');
+    }
+    const publicationBefore = harness.controller.getPublication();
+    const previewCallsBefore = harness.legacyBridge.applyPublicationContent.mock.calls.length;
+
+    await harness.controller.importNews();
+
+    expect(harness.controller.getPublication()).toEqual(publicationBefore);
+    expect(harness.legacyBridge.applyPublicationContent).toHaveBeenCalledTimes(previewCallsBefore);
+    expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+    expect(harness.elements.importNews.disabled).toBe(false);
+  });
+
   test('resultado parcial preserva campos ausentes', async () => {
     const harness = setup({ legacyBridge: { importNews: jest.fn().mockResolvedValue({ h1: 'Novo', bg: 'image-data', h2: '', chapeu: null }) } });
     await harness.controller.initialize();

@@ -117,6 +117,29 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
     });
   });
 
+  test('falha toda a extracao quando nenhum candidato da imagem responde', async () => {
+    await withNewsServer(async (baseUrl) => {
+      require('../services/newsScraper').fetch.mockResolvedValue({
+        h1: 'Titulo completo',
+        h2: 'Subtitulo completo',
+        bg: publicUrl,
+        chapeu: 'Cotidiano',
+      });
+      require('../lib/safeHttpClient').get.mockRejectedValue(
+        new SafeHttpError('TIMEOUT')
+      );
+
+      const { response, body } = await postNews(baseUrl, publicUrl);
+
+      expect(response.status).toBe(500);
+      expect(body).toMatchObject({ code: 'TIMEOUT' });
+      expect(body).not.toHaveProperty('h1');
+      expect(body).not.toHaveProperty('h2');
+      expect(body).not.toHaveProperty('chapeu');
+      expect(body).not.toHaveProperty('bg');
+    });
+  });
+
   test('converte timeout do download em resposta 422', async () => {
     await withNewsServer(async (baseUrl) => {
       require('../lib/safeHttpClient').get.mockRejectedValue(new SafeHttpError('TIMEOUT'));
