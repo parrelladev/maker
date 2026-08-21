@@ -200,7 +200,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
     });
   });
 
-  test('não expõe o corpo inválido no erro do fluxo de extração', async () => {
+  test('preserva os textos quando a imagem extraída é inválida', async () => {
     await withNewsServer(async (baseUrl) => {
       require('../services/newsScraper').fetch.mockResolvedValue({
         h1: 'Título',
@@ -215,13 +215,42 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
 
       const { response, body } = await postNews(baseUrl, publicUrl);
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(200);
       expect(body).toEqual({
-        error: 'Erro ao extrair dados da notícia',
-        code: 'INVALID_IMAGE_CONTENT',
-        detail: 'O conteúdo remoto não corresponde a uma imagem válida',
+        h1: 'Título',
+        h2: null,
+        bg: null,
+        bgSource: publicUrl,
+        chapeu: null,
       });
       expect(JSON.stringify(body)).not.toContain('private upstream response');
+      expect(console.error).toHaveBeenCalled();
+    });
+  });
+
+  test('preserva os textos quando o download da imagem excede o timeout', async () => {
+    await withNewsServer(async (baseUrl) => {
+      require('../services/newsScraper').fetch.mockResolvedValue({
+        h1: 'Título',
+        h2: 'Subtítulo',
+        bg: publicUrl,
+        chapeu: 'Categoria',
+      });
+      require('../lib/safeHttpClient').get.mockRejectedValue(
+        new SafeHttpError('TIMEOUT')
+      );
+
+      const { response, body } = await postNews(baseUrl, publicUrl);
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual({
+        h1: 'Título',
+        h2: 'Subtítulo',
+        bg: null,
+        bgSource: publicUrl,
+        chapeu: 'Categoria',
+      });
+      expect(console.error).toHaveBeenCalled();
     });
   });
 

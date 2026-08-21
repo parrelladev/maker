@@ -40,6 +40,8 @@ Também é possível copiar `config.example.js` para `config.js` ou executar `np
 2. A interface solicita HTML, CSS e manifest em `/api/templates/:template/:page`.
 3. Ao informar uma notícia, `/api/news/extract` extrai título, subtítulo, chapéu e imagem.
 4. A imagem extraída é incorporada como data URL para não bloquear a exportação por CORS.
+   Se somente o download da imagem falhar, os textos continuam disponíveis e
+   a resposta informa `bg: null`.
 5. O runtime de bindings aplica os dados ao DOM do iframe.
 6. `html-to-image` captura o iframe no tamanho do manifest e inicia o download do PNG.
 
