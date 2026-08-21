@@ -555,35 +555,7 @@ quando chamada mais de uma vez na mesma instância.
 dos estados atuais de tema e template em um snapshot normalizado, sem alterar
 esses estados.
 
-`validateGenerationInput`, em `public/js/frontend-utils.js`, recebe o snapshot
-normalizado da entrada e concentra as regras puras da geração. Seu resultado
-estruturado contém `valid`, `code`, `message` e `focusField`; esses códigos são
-detalhes internos do frontend, não uma API pública versionada.
-
-`generateArtWithPreviewFlow` mantém a validação em duas fases. A primeira ocorre
-antes dos efeitos assíncronos e verifica as pré-condições disponíveis na
-entrada. A segunda ocorre depois da extração e verifica categoria e imagem no
-payload montado por `buildPreviewData`, a mesma função usada pelo preview.
-`applyGenerationValidation` traduz o resultado inválido em toast e foco no
-campo indicado. A precedência dos valores manuais sobre os extraídos permanece
-a mesma nas duas fases e na montagem do preview.
-
-Depois da primeira validação, a geração captura um contexto imutável com o
-snapshot completo do formulário, URL, template, página, versão da sessão do
-renderer e identificador monotônico da geração. Manifest e logo são associados a
-esse contexto quando o carregamento termina. Dados extraídos complementam o
-snapshot, mas os campos não são relidos para montar a arte: alterações feitas
-durante a operação pertencem à próxima geração.
-
-Após carregar manifest, extrair dados, incorporar imagem, inicializar preview e
-concluir o download, o fluxo confirma que URL, template, página, sessão e
-identificador ainda correspondem à geração atual. Uma troca em qualquer desses
-valores torna a operação obsoleta. Nesse caso ela termina sem atualizar cache,
-campos, preview ou exportação e sem exibir erro ou sucesso. Uma geração mais
-nova também invalida as anteriores; somente a mais nova controla a restauração
-do loading enquanto estiver em andamento.
-
-Os contratos de imagem dessas fases são distintos. `isValidRemoteImageUrl`
+Os contratos de imagem do frontend são distintos. `isValidRemoteImageUrl`
 aceita somente HTTP e HTTPS e é usado para a imagem digitada manualmente.
 `isValidResolvedImageValue` aceita HTTP/HTTPS ou uma data URL Base64 de PNG,
 JPEG, GIF ou WebP, formato que o backend produz depois de validar e incorporar
@@ -594,7 +566,7 @@ contrato da imagem resolvida.
 O campo de imagem pode ser preenchido pelo usuário ou pela importação do novo
 controller via `LegacyEditorBridge`. Quando a extração preenche o campo, a ponte
 registra a origem `extracted` junto com o valor exato em
-`resolvedImageFieldState`. O snapshot da geração só expõe esse conteúdo como
+`resolvedImageFieldState`. `buildPreviewData` só expõe esse conteúdo como
 `resolvedImage` enquanto origem e valor ainda correspondem ao campo; caso
 contrário, ele é `manualImage`. Um evento `input` invalida imediatamente a
 origem automática. Troca da URL editorial ou edição manual da imagem também
@@ -838,25 +810,15 @@ do elemento `html`. Todos declaram dimensões de 1080 × 1920. O runtime suporta
 mais tipos de binding do que os manifests atuais exercitam.
 
 O atributo `required` presente em alguns bindings é enviado ao frontend, mas o
-runtime não o interpreta. Categoria e imagem efetivas são pré-condições da
-segunda fase de `validateGenerationInput`, executada depois da extração.
+runtime não o interpreta.
 
 ## Exportação para PNG
 
-`generateArtWithPreviewFlow` executa a primeira fase de validação antes de
-mostrar o loading e então:
-
-1. carrega novamente os dados do template, usando o cache de `Api`;
-2. confirma que o contexto da geração ainda é atual;
-3. obtém ou reutiliza a extração associada à URL capturada e só então atualiza
-   seu cache;
-4. monta os dados da arte com `buildPreviewData`, usando o snapshot inicial;
-5. exige categoria e imagem no payload montado;
-6. incorpora pelo backend uma imagem do payload ainda remota;
-7. reconstrói o payload pela mesma função, com a imagem exportável, e o aplica
-   ao mesmo DOM do preview;
-8. chama `PreviewExport.downloadPreview` e confirma novamente o contexto antes
-   do toast de sucesso.
+`downloadCurrent` e `downloadAll`, em `public/js/editor-ui.js`, capturam e
+revalidam a autoridade dos contexts reais por meio de `LegacyEditorBridge`.
+A ponte chama `PreviewExport.downloadPreview` com o iframe e o manifest do
+formato correspondente, sem reinicializar o renderer nem reaplicar um payload
+alternativo antes da captura.
 
 Antes da captura, `downloadPreview` espera `document.fonts.ready`, aguarda
 imagens e verifica URLs de imagem remotas. Em seguida chama

@@ -259,25 +259,8 @@ do formulário e o estado global de template, tema, notícia, manifest e preview
 incluindo abertura, fechamento e troca de template. O cache de notícias tem
 cobertura para reutilização na mesma URL e substituição por URL diferente. A
 chamada direta sem contexto ainda caracteriza o contrato de associação do
-resultado à URL solicitada; os fluxos de busca explícita e geração passam um
-verificador e impedem que respostas obsoletas atualizem o cache.
-
-A mesma suíte cobre os caminhos de validação da geração na orquestração,
-incluindo mensagens, foco e ausência de efeitos assíncronos nas falhas iniciais,
-além da restauração do loading e do botão nas falhas pós-extração cobertas. Uma
-geração válida com conflito entre valores manuais e extraídos confirma a
-precedência da categoria e da imagem manuais, a aplicação da data URL
-incorporada ao preview e o envio desse preview ao exportador simulado. Outro
-teste compara o payload completo aplicado imediatamente antes da captura com o
-resultado de `buildPreviewData`, incluindo textos, categoria, imagem, tema e
-logo, e confirma a ordem entre atualização do DOM e download.
-
-Promises controladas cobrem mudança de URL durante extração, troca de template,
-fechamento e reabertura do modal e duas gerações concorrentes concluídas fora
-de ordem. Os testes confirmam que somente o contexto mais novo pode alterar
-cache, categoria, preview e exportação. Outro caso altera campos durante a
-extração e demonstra que a geração usa o snapshot inicial, deixando as edições
-posteriores para a operação seguinte.
+resultado à URL solicitada; importações passam um verificador e impedem que
+respostas obsoletas atualizem o cache.
 
 No fluxo independente “Buscar dados da matéria”, Promises controladas cobrem A
 lenta/B rápida, A concluída antes de B, rejeição tardia de A, propriedade do
@@ -300,13 +283,6 @@ parciais contendo isoladamente título, subtítulo, chapéu ou imagem. Os testes
 confirmam retry real na mesma URL depois de `{}`, cache após o retry válido,
 reutilização na terceira busca, preservação de cache válido anterior e da
 proveniência da imagem, além do descarte de resposta vazia obsoleta.
-
-Falhas injetadas em carregamento de manifest, incorporação da imagem,
-inicialização do preview e download confirmam ausência de sucesso, bloqueio das
-etapas posteriores e restauração do loading e do botão. Promises controladas
-também confirmam que rejeições antigas de extração, incorporação e download não
-produzem erro depois de troca de sessão ou início de uma geração mais recente,
-sem remover o loading pertencente à operação atual.
 
 Testes diretos de `buildPreviewData` caracterizam sua integração com formulário
 e cache, enquanto testes unitários de `createArtworkData` exercitam a montagem
@@ -354,10 +330,7 @@ A suíte também executa o módulo estático `public/js/preview-runtime.js` pelo
 mesmo bootstrap escrito no iframe. Os testes caracterizam sua API explícita,
 readiness atrasada, drenagem ordenada da fila, falha de carregamento, falha de
 inicialização, rejeição e retry após falha de binding enfileirado, reutilização
-sem reinjeção ou listeners duplicados, escala e resize. A geração confirma a
-ordem entre runtime pronto, payload aplicado e início da exportação, bloqueia o
-download quando o payload final falha e descarta silenciosamente falhas de
-update de gerações obsoletas. A serialização do manifest cobre fechamento de
+sem reinjeção ou listeners duplicados, escala e resize. A serialização do manifest cobre fechamento de
 script, reconstrução dos valores originais, `<script>`, aspas, barras
 invertidas, U+2028 e U+2029. Os demais casos caracterizam texto,
 HTML, imagem, as três formas de logo, variáveis CSS, classes, atributos, campos
@@ -381,7 +354,7 @@ opcionais ausentes e atualizações repetidas.
 | `src/services/templatePageService.js` | `loadTemplatePage` | manifest, HTML, CSS compartilhado e da página, logo, fallback e modelo de resposta |
 | `src/routes/news.js` | validações de `/extract` e `/embed-image`; `embedImage` pela rota | validações existentes, incorporação, limites configurados, MIME, erros classificados, falha inesperada sem detalhe e bloqueios |
 | `src/services/newsScraper.js` | `extractChapeu` e `fetch` | extração, configuração do cliente, respostas e bloqueios |
-| `public/script.js` | estado da tela, cache e fluxo de geração | snapshot normalizado e imutável na geração, transições do estado global, descarte por URL, template, sessão e geração, concorrência fora de ordem, falhas assíncronas, validações da orquestração, matriz de precedência, payload canônico no preview/exportação e restauração do loading e botão |
+| `public/script.js` | estado técnico da tela, cache e ponte do editor | snapshot normalizado, transições do estado global, cache por URL, aplicação do conteúdo editorial, contexts reais por formato, autoridade de exportação e restauração do loading e botão |
 | `public/js/preview-runtime.js` | `PreviewRuntime`, `__previewRuntimeReady` e `__updatePreview` | readiness, carga e inicialização, falhas, retry, fila, API explícita, bindings, escala, resize e listeners idempotentes |
 | `public/js/frontend-utils.js` | `createArtworkData`, `validateGenerationInput` e transformações auxiliares | payload completo da arte, precedência e fallbacks sem DOM ou globals; validação pura estruturada, URL remota HTTP/HTTPS, allowlist de data URL resolvida, normalização, ícones de toast e nome do PNG |
 

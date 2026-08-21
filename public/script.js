@@ -1,11 +1,8 @@
 const {
-  buildExportFilename,
   createArtworkData,
   getToastIcon,
   isHttpUrl,
-  isValidResolvedImageValue,
-  normalizeOptionalValue,
-  validateGenerationInput
+  normalizeOptionalValue
 } = window.FrontendUtils;
 
 const DEFAULT_PAGE = 'index';
@@ -24,7 +21,6 @@ let previewInitializedPage = null;
 let previewInitializationVersion = 0;
 // Estado técnico de sessão do renderer; a seleção editorial pertence à publication.
 let editorSessionVersion = 0;
-let latestGenerationId = 0;
 let latestBestEffortPreviewUpdateId = 0;
 let editorPreviewReady = false;
 const contentSyncPending = { feed: false, story: false };
@@ -128,35 +124,6 @@ function setExtractedImageFieldValue(value, sourceNewsUrl) {
     value,
     newsUrl: sourceNewsUrl
   };
-}
-
-function createGenerationContext(formData) {
-  return {
-    formData: { ...formData },
-    generationId: ++latestGenerationId,
-    editorSessionVersion,
-    page: currentPage,
-    template: formData.template,
-    url: formData.newsUrl
-  };
-}
-
-function isGenerationContextCurrent(context) {
-  return (
-    context.generationId === latestGenerationId
-    && context.editorSessionVersion === editorSessionVersion
-    && context.template === currentTemplate
-    && context.page === currentPage
-    && context.url === normalizeOptionalValue(newsUrl.value)
-  );
-}
-
-function assertGenerationContextCurrent(context) {
-  if (isGenerationContextCurrent(context)) return;
-
-  const error = new Error('Geração obsoleta');
-  error.code = STALE_OPERATION_CODE;
-  throw error;
 }
 
 function isStaleOperationError(error) {
@@ -795,130 +762,6 @@ function isExportAuthorityCurrent(authority) {
     && context.initializedPage === authority.initializedPage
     && context.initializationVersion === authority.initializationVersion
   );
-}
-
-// Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
-async function generateArtWithPreviewFlow() {
-  const exportFormat = currentFormat || 'story';
-  const formData = readGenerationFormData();
-
-  const inputValidation = validateGenerationInput(formData);
-  if (!applyGenerationValidation(inputValidation)) {
-    return;
-  }
-
-  const exportAuthority = captureExportAuthority(exportFormat);
-  if (!exportAuthority) {
-    showToast('Aguarde o preview ficar pronto para baixar', 'info');
-    return;
-  }
-
-  const generationContext = createGenerationContext(formData);
-  const assertCurrent = () => assertGenerationContextCurrent(generationContext);
-
-  try {
-    showLoading();
-
-    const manifestData = exportAuthority.manifestData;
-    assertCurrent();
-    const extractedData = await getOrExtractNewsData(
-      generationContext.url,
-      assertCurrent
-    );
-    assertCurrent();
-
-    if (
-      !generationContext.formData.manualCategory
-      && extractedData.chapeu
-      && normalizeOptionalValue(customTag.value)
-        === generationContext.formData.manualCategory
-    ) {
-      assertCurrent();
-      customTag.value = extractedData.chapeu;
-    }
-
-    const artworkData = buildPreviewData(
-      manifestData,
-      null,
-      generationContext.formData,
-      extractedData
-    );
-
-    const resolvedContentValidation = validateGenerationInput({
-      ...generationContext.formData,
-      requireResolvedContent: true,
-      resolvedCategory: artworkData.tag,
-      effectiveImage: artworkData.bg
-    });
-    if (!applyGenerationValidation(resolvedContentValidation)) {
-      return;
-    }
-
-    const pageName = manifestData.page || 'index';
-    const exportBg = /^https?:\/\//i.test(artworkData.bg)
-      ? await window.Api.embedImage(artworkData.bg)
-      : artworkData.bg;
-    assertCurrent();
-
-    if (!isValidResolvedImageValue(exportBg)) {
-      applyGenerationValidation({
-        valid: false,
-        code: 'IMAGE_REQUIRED',
-        message: 'Não encontramos uma imagem válida. Informe um link de imagem ou tente novamente.',
-        focusField: 'customImageUrl'
-      });
-      return;
-    }
-
-    const exportArtworkData = buildPreviewData(
-      manifestData,
-      exportBg,
-      generationContext.formData,
-      extractedData
-    );
-    if (!isExportAuthorityCurrent(exportAuthority)) return;
-    applyArtworkDataToPreview(exportArtworkData, exportFormat);
-    if (!isExportAuthorityCurrent(exportAuthority)) return;
-    await window.PreviewExport.downloadPreview(
-      exportAuthority.frame,
-      manifestData,
-      buildExportFilename(generationContext.template, pageName),
-    );
-    assertCurrent();
-
-    showToast('Arte gerada e download iniciado!', 'success');
-  } catch (error) {
-    if (
-      isStaleOperationError(error)
-      || !isGenerationContextCurrent(generationContext)
-    ) {
-      return;
-    }
-    console.error('Erro ao gerar arte:', error);
-    showToast('Erro ao gerar arte: ' + error.message, 'error');
-  } finally {
-    if (generationContext.generationId === latestGenerationId) {
-      hideLoading();
-    }
-  }
-}
-
-function applyGenerationValidation(validation) {
-  if (validation.valid) return true;
-
-  showToast(validation.message, 'error');
-
-  const focusTargets = {
-    newsUrl,
-    customImageUrl,
-    customTag
-  };
-  const focusTarget = focusTargets[validation.focusField];
-  if (focusTarget) {
-    focusTarget.focus();
-  }
-
-  return false;
 }
 
 function showLoading() {
