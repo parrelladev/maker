@@ -26,8 +26,8 @@ let previewInitializationVersion = 0;
 let editorSessionVersion = 0;
 let latestGenerationId = 0;
 let latestBestEffortPreviewUpdateId = 0;
-let editorPreviewReady = true;
-let contentSyncPending = false;
+let editorPreviewReady = false;
+const contentSyncPending = { feed: false, story: false };
 let currentImageAdjustments = { zoom: 1, x: 50, y: 50 };
 let currentFormat = null;
 const generateDisableReasons = new Set();
@@ -48,7 +48,42 @@ const themeWrapper = document.getElementById('themeWrapper');
 const customTheme = document.getElementById('customTheme');
 const customTag = document.getElementById('customTag');
 const previewFrame = document.getElementById('previewFrame');
+const previewFrameFeed = document.getElementById('previewFrameFeed');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
+const previewContexts = {
+  story: {
+    frame: previewFrame,
+    placeholder: previewPlaceholder,
+    template: null, page: DEFAULT_PAGE, theme: null, format: 'story',
+    manifestData: null, initializedTemplate: null, initializedPage: null,
+    initializationVersion: 0, ready: false,
+    imageAdjustments: { zoom: 1, x: 50, y: 50 }
+  },
+  feed: {
+    frame: previewFrameFeed,
+    placeholder: document.querySelector('[data-preview-placeholder="feed"]'),
+    template: null, page: DEFAULT_PAGE, theme: null, format: 'feed',
+    manifestData: null, initializedTemplate: null, initializedPage: null,
+    initializationVersion: 0, ready: false,
+    imageAdjustments: { zoom: 1, x: 50, y: 50 }
+  }
+};
+
+function getPreviewContext(format = currentFormat) {
+  return previewContexts[format || 'story'] || null;
+}
+
+function selectLegacyContextAlias(format) {
+  const context = getPreviewContext(format);
+  currentFormat = format;
+  currentTemplate = context?.template || null;
+  currentPage = context?.page || DEFAULT_PAGE;
+  currentTheme = context?.theme || null;
+  currentManifestData = context?.manifestData || null;
+  previewInitializedTemplate = context?.initializedTemplate || null;
+  previewInitializedPage = context?.initializedPage || null;
+  editorPreviewReady = context?.ready === true;
+}
 
 function readGenerationFormData() {
   const imageFieldValue = normalizeOptionalValue(customImageUrl.value);
@@ -128,10 +163,16 @@ function isStaleOperationError(error) {
   return error && error.code === STALE_OPERATION_CODE;
 }
 
-function resizePreviewFrame() {
-  const wrapper = document.querySelector('.preview-frame-wrapper');
-  const container = document.querySelector('.preview-container');
-  if (!wrapper || !previewFrame) return;
+function resizePreviewFrame(format = null) {
+  if (!format) {
+    Object.keys(previewContexts).forEach(resizePreviewFrame);
+    return;
+  }
+  const context = getPreviewContext(format);
+  const wrapper = document.querySelector(`[data-preview-viewport][data-preview-format="${format}"]`)
+    || (format === 'story' ? document.querySelector('.preview-frame-wrapper') : null);
+  const container = wrapper?.parentElement || (format === 'story' ? document.querySelector('.preview-container') : null);
+  if (!wrapper || !context.frame) return;
 
   wrapper.style.width = '';
   wrapper.style.height = '';
@@ -140,11 +181,11 @@ function resizePreviewFrame() {
   const availableHeight = container?.clientHeight;
   if (!availableWidth) return;
 
-  const dimensions = currentManifestData?.manifest?.dimensions || { width: 1080, height: 1920 };
+  const dimensions = context.manifestData?.manifest?.dimensions || { width: 1080, height: format === 'feed' ? 1350 : 1920 };
   const renderWidth = Number(dimensions.width) || 1080;
   const renderHeight = Number(dimensions.height) || 1920;
-  previewFrame.style.width = `${renderWidth}px`;
-  previewFrame.style.height = `${renderHeight}px`;
+  context.frame.style.width = `${renderWidth}px`;
+  context.frame.style.height = `${renderHeight}px`;
   wrapper.style.aspectRatio = `${renderWidth} / ${renderHeight}`;
   const widthScale = availableWidth / renderWidth;
   const heightScale = availableHeight ? availableHeight / renderHeight : widthScale;
@@ -152,7 +193,7 @@ function resizePreviewFrame() {
 
   wrapper.style.width = `${renderWidth * scale}px`;
   wrapper.style.height = `${renderHeight * scale}px`;
-  previewFrame.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  context.frame.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -238,31 +279,34 @@ function hasUsefulNewsData(data) {
 async function ensurePreviewInitialized({
   template = currentTemplate,
   page = currentPage,
+  activeFormat = currentFormat,
   manifestData: providedManifestData = null,
   assertCurrent = null
 } = {}) {
-  if (!previewFrame || !template) {
+  const context = getPreviewContext(activeFormat);
+  const frame = context.frame;
+  if (!frame || !template) {
     return null;
   }
 
   if (
-    previewInitializedTemplate === template
-    && previewInitializedPage === page
-    && currentManifestData
+    context.initializedTemplate === template
+    && context.initializedPage === page
+    && context.manifestData
   ) {
     if (assertCurrent) assertCurrent();
-    return currentManifestData;
+    return context.manifestData;
   }
 
   const manifestData = providedManifestData || await loadManifest(template, page);
   if (assertCurrent) assertCurrent();
 
-  const frameWindow = previewFrame.contentWindow;
-  const frameDoc = previewFrame.contentDocument || frameWindow?.document;
+  const frameWindow = frame.contentWindow;
+  const frameDoc = frame.contentDocument || frameWindow?.document;
   if (!frameWindow || !frameDoc) {
     throw new Error('Falha ao inicializar o runtime do preview');
   }
-  const initializationVersion = ++previewInitializationVersion;
+  const initializationVersion = ++context.initializationVersion;
 
   const cssContent = Array.isArray(manifestData.css)
     ? manifestData.css.map(file => file.content || '').join('\n')
@@ -359,25 +403,30 @@ async function ensurePreviewInitialized({
   try {
     await runtimeReady;
     if (assertCurrent) assertCurrent();
-    if (initializationVersion !== previewInitializationVersion) {
+    if (initializationVersion !== context.initializationVersion) {
       return null;
     }
 
-    currentManifestData = manifestData;
-    previewInitializedTemplate = template;
-    previewInitializedPage = page;
-    resizePreviewFrame();
+    context.manifestData = manifestData;
+    context.initializedTemplate = template;
+    context.initializedPage = page;
+    resizePreviewFrame(activeFormat);
+    if (context === previewContexts.story) {
+      currentManifestData = manifestData;
+      previewInitializedTemplate = template;
+      previewInitializedPage = page;
+    }
 
-    if (previewPlaceholder) {
-      previewPlaceholder.style.display = 'none';
+    if (context.placeholder) {
+      context.placeholder.style.display = 'none';
     }
 
     return manifestData;
   } catch (error) {
-    if (initializationVersion === previewInitializationVersion) {
-      currentManifestData = null;
-      previewInitializedTemplate = null;
-      previewInitializedPage = null;
+    if (initializationVersion === context.initializationVersion) {
+      context.manifestData = null;
+      context.initializedTemplate = null;
+      context.initializedPage = null;
     }
     throw new Error('Falha ao inicializar o runtime do preview');
   } finally {
@@ -395,7 +444,8 @@ function buildPreviewData(
   extractedDataOverride = null,
   contentOverride = null,
   imageAdjustments = currentImageAdjustments,
-  activeFormat = currentFormat
+  activeFormat = currentFormat,
+  themeOverride = currentTheme
 ) {
   if (contentOverride) {
     const contentImage = normalizeOptionalValue(contentOverride.image);
@@ -411,7 +461,7 @@ function buildPreviewData(
       manualCategory: normalizeOptionalValue(contentOverride.tag),
       manualImage: hasMatchingResolvedImage ? '' : contentImage,
       resolvedImage: hasMatchingResolvedImage ? contentImage : '',
-      theme: currentTheme,
+      theme: themeOverride,
       template: currentTemplate
     };
     extractedDataOverride = hasMatchingResolvedImage ? { bg: contentImage } : {};
@@ -434,8 +484,9 @@ function buildPreviewData(
   };
 }
 
-function applyArtworkDataToPreview(artworkData) {
-  const frameWindow = previewFrame && previewFrame.contentWindow;
+function applyArtworkDataToPreview(artworkData, activeFormat = currentFormat) {
+  const frame = getPreviewContext(activeFormat).frame;
+  const frameWindow = frame && frame.contentWindow;
   if (!frameWindow || typeof frameWindow.__updatePreview !== 'function') {
     throw new Error('O runtime do preview não está disponível');
   }
@@ -485,20 +536,25 @@ async function updatePreview(
   imageAdjustments = currentImageAdjustments,
   activeFormat = currentFormat
 ) {
-  if (!previewFrame || !currentTemplate) {
+  const context = getPreviewContext(activeFormat);
+  if (!context) throw new Error('Formato de preview indisponÃ­vel');
+  if (!context.frame) throw new Error('Iframe do formato nÃ£o estÃ¡ disponÃ­vel');
+  if (!context.template) {
     return;
   }
 
   try {
-    const manifestData = await ensurePreviewInitialized({ assertCurrent });
+    const manifestData = await ensurePreviewInitialized({
+      template: context.template, page: context.page, activeFormat, assertCurrent
+    });
     if (!manifestData) return;
     if (assertCurrent) assertCurrent();
 
     const artworkData = buildPreviewData(
-      manifestData, backgroundOverride, undefined, null, contentOverride, imageAdjustments, activeFormat
+      manifestData, backgroundOverride, undefined, null, contentOverride, imageAdjustments, activeFormat, context.theme
     );
     if (assertCurrent) assertCurrent();
-    applyArtworkDataToPreview(artworkData);
+    applyArtworkDataToPreview(artworkData, activeFormat);
   } catch (error) {
     if (isStaleOperationError(error)) return;
     if (assertCurrent) assertCurrent();
@@ -509,15 +565,25 @@ async function updatePreview(
 // Sincroniza somente o estado técnico necessário ao renderer. A escolha editorial
 // de brand/family/variant/theme já ocorreu na publication antes desta fronteira.
 function selectRendererState(renderer, theme, activeFormat = null) {
+  const format = activeFormat || 'story';
+  const context = getPreviewContext(format);
+  if (!context) throw new Error(`Formato de preview indisponÃ­vel: ${String(format)}`);
   editorSessionVersion += 1;
-  currentTemplate = renderer.template;
-  currentPage = renderer.page || DEFAULT_PAGE;
-  currentTheme = theme || null;
-  currentFormat = activeFormat;
-  currentManifestData = null;
-  previewInitializedTemplate = null;
-  previewInitializedPage = null;
-  previewInitializationVersion += 1;
+  context.template = renderer.template;
+  context.page = renderer.page || DEFAULT_PAGE;
+  context.theme = theme || null;
+  context.manifestData = null;
+  context.initializedTemplate = null;
+  context.initializedPage = null;
+  context.ready = false;
+  context.initializationVersion += 1;
+  selectLegacyContextAlias(format);
+  if (context === previewContexts.story) {
+    currentManifestData = null;
+    previewInitializedTemplate = null;
+    previewInitializedPage = null;
+    previewInitializationVersion += 1;
+  }
 
   if (customTheme) {
     customTheme.innerHTML = (renderer.themes || [])
@@ -543,14 +609,16 @@ window.LegacyEditorBridge = {
     assertCurrent = null
   }) {
     if (assertCurrent) assertCurrent();
-    currentTheme = theme || null;
-    currentFormat = activeFormat || null;
+    const context = getPreviewContext(activeFormat);
+    context.theme = theme || null;
+    selectLegacyContextAlias(activeFormat || 'story');
     if (customTheme) customTheme.value = currentTheme || '';
     if (importedImage) {
       setExtractedImageFieldValue(importedImage.value, importedImage.url);
     }
     await updatePreview(null, assertCurrent, content, imageAdjustments, activeFormat);
     if (assertCurrent) assertCurrent();
+    context.imageAdjustments = { ...imageAdjustments };
     currentImageAdjustments = { ...imageAdjustments };
   },
 
@@ -577,9 +645,20 @@ window.LegacyEditorBridge = {
     setGenerateDisabled('news-import', pending);
   },
 
-  setContentSyncPending(pending) {
-    contentSyncPending = pending;
-    setGenerateDisabled('content-sync', pending);
+  setContentSyncPending(pending, activeFormat = currentFormat) {
+    const format = activeFormat || 'story';
+    if (!getPreviewContext(format)) return;
+    contentSyncPending[format] = pending;
+    if (format === currentFormat || (!currentFormat && format === 'story')) {
+      setGenerateDisabled('content-sync', pending);
+    }
+  },
+
+  setActiveFormat(activeFormat) {
+    const format = activeFormat || 'story';
+    selectLegacyContextAlias(format);
+    setGenerateDisabled('content-sync', contentSyncPending[format]);
+    setGenerateDisabled('editor-preview', !getPreviewContext(format)?.ready);
   },
 
   async selectRenderer({
@@ -594,46 +673,113 @@ window.LegacyEditorBridge = {
     selectRendererState(renderer, theme, activeFormat);
     await updatePreview(null, assertCurrent, content, imageAdjustments, activeFormat);
     if (assertCurrent) assertCurrent();
+    getPreviewContext(activeFormat).imageAdjustments = { ...imageAdjustments };
     currentImageAdjustments = { ...imageAdjustments };
   },
 
-  setEditorPreviewReady(ready) {
-    editorPreviewReady = ready;
-    setGenerateDisabled('editor-preview', !ready);
+  setEditorPreviewReady(format, ready) {
+    // Compatibilidade temporaria com chamadas legadas que enviavam apenas boolean.
+    if (typeof format === 'boolean') {
+      ready = format;
+      format = currentFormat || 'story';
+    }
+    const context = getPreviewContext(format);
+    if (!context) return;
+    context.ready = ready === true;
+    if (format === currentFormat || (!currentFormat && format === 'story')) {
+      editorPreviewReady = context.ready;
+      setGenerateDisabled('editor-preview', !context.ready);
+    }
   },
 
   resizePreview: resizePreviewFrame,
 
-  clearPreview() {
+  clearPreview(activeFormat = currentFormat) {
+    const context = getPreviewContext(activeFormat);
     editorSessionVersion += 1;
-    currentTemplate = null;
-    currentPage = DEFAULT_PAGE;
-    currentFormat = null;
-    currentManifestData = null;
-    previewInitializedTemplate = null;
-    previewInitializedPage = null;
-    previewInitializationVersion += 1;
-    const frameDoc = previewFrame?.contentDocument;
+    context.template = null;
+    context.page = DEFAULT_PAGE;
+    context.manifestData = null;
+    context.initializedTemplate = null;
+    context.initializedPage = null;
+    context.ready = false;
+    context.initializationVersion += 1;
+    const frameDoc = context.frame?.contentDocument;
     if (frameDoc) {
       frameDoc.open();
       frameDoc.write('<!doctype html><html><body></body></html>');
       frameDoc.close();
     }
-    if (previewPlaceholder) previewPlaceholder.style.display = '';
+    if (context.placeholder) context.placeholder.style.display = '';
   }
 };
 
+function getReadyExportContext(format) {
+  const context = getPreviewContext(format);
+  if (
+    !context
+    || context.ready !== true
+    || contentSyncPending[format]
+    || !context.frame
+    || !context.template
+    || !context.page
+    || !context.manifestData
+    || !context.manifestData.manifest
+    || context.manifestData.template !== context.template
+    || (context.manifestData.page || DEFAULT_PAGE) !== context.page
+    || context.initializedTemplate !== context.template
+    || context.initializedPage !== context.page
+  ) {
+    return null;
+  }
+  return context;
+}
+
+function captureExportAuthority(format) {
+  const context = getReadyExportContext(format);
+  if (!context) return null;
+  return {
+    format,
+    context,
+    frame: context.frame,
+    manifestData: context.manifestData,
+    template: context.template,
+    page: context.page,
+    initializedTemplate: context.initializedTemplate,
+    initializedPage: context.initializedPage,
+    initializationVersion: context.initializationVersion
+  };
+}
+
+function isExportAuthorityCurrent(authority) {
+  if (!authority) return false;
+  const context = getReadyExportContext(authority.format);
+  return Boolean(
+    context
+    && context === authority.context
+    && context.frame === authority.frame
+    && context.manifestData === authority.manifestData
+    && context.template === authority.template
+    && context.page === authority.page
+    && context.initializedTemplate === authority.initializedTemplate
+    && context.initializedPage === authority.initializedPage
+    && context.initializationVersion === authority.initializationVersion
+  );
+}
+
 // Etapa 3: gera o PNG final reaproveitando o que foi visto no preview.
 async function generateArtWithPreviewFlow() {
-  if (!editorPreviewReady || contentSyncPending) {
-    showToast('Aguarde o preview ficar pronto para baixar', 'info');
-    return;
-  }
-
+  const exportFormat = currentFormat || 'story';
   const formData = readGenerationFormData();
 
   const inputValidation = validateGenerationInput(formData);
   if (!applyGenerationValidation(inputValidation)) {
+    return;
+  }
+
+  const exportAuthority = captureExportAuthority(exportFormat);
+  if (!exportAuthority) {
+    showToast('Aguarde o preview ficar pronto para baixar', 'info');
     return;
   }
 
@@ -643,10 +789,7 @@ async function generateArtWithPreviewFlow() {
   try {
     showLoading();
 
-    const manifestData = await loadManifest(
-      generationContext.template,
-      generationContext.page
-    );
+    const manifestData = exportAuthority.manifestData;
     assertCurrent();
     const extractedData = await getOrExtractNewsData(
       generationContext.url,
@@ -703,16 +846,11 @@ async function generateArtWithPreviewFlow() {
       generationContext.formData,
       extractedData
     );
-    await ensurePreviewInitialized({
-      template: generationContext.template,
-      page: generationContext.page,
-      manifestData,
-      assertCurrent
-    });
-    assertCurrent();
-    applyArtworkDataToPreview(exportArtworkData);
+    if (!isExportAuthorityCurrent(exportAuthority)) return;
+    applyArtworkDataToPreview(exportArtworkData, exportFormat);
+    if (!isExportAuthorityCurrent(exportAuthority)) return;
     await window.PreviewExport.downloadPreview(
-      previewFrame,
+      exportAuthority.frame,
       manifestData,
       buildExportFilename(generationContext.template, pageName),
     );

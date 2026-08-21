@@ -8,12 +8,13 @@
   function createEditorController({ document, api, state, catalogHelpers, frontendUtils, legacyBridge = null }) {
     let catalog = null;
     let publication = state.createPublication();
-    let latestRendererRequest = 0;
-    let renderer = null;
-    let previewState = 'idle';
+    const previewContexts = {
+      feed: { renderer: null, previewState: 'idle', rendererRequestId: 0, contentSyncId: 0, syncPending: false, dimensions: null, structuralSelection: null },
+      story: { renderer: null, previewState: 'idle', rendererRequestId: 0, contentSyncId: 0, syncPending: false, dimensions: null, structuralSelection: null },
+    };
     let latestNewsImportId = 0;
-    let latestContentSyncId = 0;
     let activeFormat = INITIAL_FORMAT;
+    let viewMode = INITIAL_FORMAT;
 
     const controls = {
       brand: document.querySelector('[data-control="brand"]'),
@@ -25,8 +26,7 @@
       importNews: document.querySelector('[data-action="import-news"]'),
       imageAdjustments: document.querySelector('[data-control="image-adjustments"]'),
       resetImageAdjustments: document.querySelector('[data-action="reset-image-adjustments"]'),
-      previewViewport: document.querySelector('[data-preview-viewport]'),
-      previewFrame: document.querySelector('#previewFrame'),
+      previewStage: document.querySelector('[data-preview-stage]'),
     };
 
     function setStatus(message) {
@@ -61,7 +61,7 @@
     }
 
     function assertContentSyncCurrent(syncId, format, assertCurrent = null) {
-      if (syncId !== latestContentSyncId || format !== activeFormat) {
+      if (syncId !== previewContexts[format].contentSyncId) {
         const error = new Error('SincronizaÃ§Ã£o de conteÃºdo obsoleta');
         error.code = 'OPERATION_STALE';
         throw error;
@@ -69,20 +69,21 @@
       if (assertCurrent) assertCurrent();
     }
 
-    async function syncPublicationContentToPreview({
+    async function syncFormatContent(format, {
       importedImage = null,
       assertCurrent = null,
       pendingStatus = 'Atualizando preview',
       readyStatus = 'Pronto',
     } = {}) {
-      if (previewState !== 'ready') return false;
-      const syncId = ++latestContentSyncId;
+      const context = previewContexts[format];
+      if (context.previewState !== 'ready') return false;
+      const syncId = ++context.contentSyncId;
       const content = { ...publication.content };
-      const format = activeFormat;
       const theme = publication.formats[format].theme;
       const imageAdjustments = { ...publication.formats[format].imageAdjustments };
       const assertSyncCurrent = () => assertContentSyncCurrent(syncId, format, assertCurrent);
-      legacyBridge?.setContentSyncPending?.(true);
+      context.syncPending = true;
+      legacyBridge?.setContentSyncPending?.(true, format);
       if (pendingStatus) setStatus(pendingStatus);
 
       try {
@@ -91,13 +92,24 @@
           assertCurrent: assertSyncCurrent
         });
         assertSyncCurrent();
-        legacyBridge?.setContentSyncPending?.(false);
+        context.syncPending = false;
+        legacyBridge?.setContentSyncPending?.(false, format);
         if (readyStatus) setStatus(readyStatus);
         return true;
       } catch (error) {
-        if (syncId !== latestContentSyncId || format !== activeFormat || error?.code === 'OPERATION_STALE') return false;
+        if (syncId !== context.contentSyncId || error?.code === 'OPERATION_STALE') return false;
         setStatus('Preview nÃ£o pÃ´de ser atualizado');
         throw error;
+      }
+    }
+
+    async function syncPublicationContentToPreview(options = {}) {
+      const formats = viewMode === 'compare' ? ['feed', 'story'] : [activeFormat];
+      try {
+        const results = await Promise.all(formats.map(format => syncFormatContent(format, options)));
+        return results.some(Boolean);
+      } finally {
+        legacyBridge?.setActiveFormat?.(activeFormat);
       }
     }
 
@@ -166,11 +178,11 @@
       }
     }
 
-    function setPreviewState(nextState) {
-      previewState = nextState;
+    function setPreviewState(format, nextState) {
+      previewContexts[format].previewState = nextState;
       const ready = nextState === 'ready';
       if (legacyBridge?.setEditorPreviewReady) {
-        legacyBridge.setEditorPreviewReady(ready);
+        legacyBridge.setEditorPreviewReady(format, ready);
       } else if (controls.downloadCurrent) {
         controls.downloadCurrent.disabled = !ready;
       }
@@ -240,9 +252,18 @@
       );
       renderImageAdjustments(format?.capabilities);
       document.querySelectorAll('[data-view-mode]').forEach(button => {
-        const selected = button.dataset.viewMode === activeFormat;
+        const selected = button.dataset.viewMode === viewMode;
         button.setAttribute('aria-pressed', String(selected));
         button.classList.toggle?.('is-active', selected);
+      });
+      if (controls.previewStage) controls.previewStage.dataset.viewMode = viewMode;
+      document.querySelectorAll('[data-preview-panel]').forEach(panel => {
+        const formatId = panel.dataset.previewPanel;
+        panel.hidden = viewMode !== 'compare' && viewMode !== formatId;
+        panel.classList.toggle?.('is-active', formatId === activeFormat);
+      });
+      document.querySelectorAll('[data-select-preview-format]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.selectPreviewFormat === activeFormat));
       });
     }
 
@@ -250,16 +271,20 @@
       return format === 'story' ? 'Story' : format === 'feed' ? 'Feed' : format;
     }
 
-    function updatePreviewDimensions(dimensions) {
+    function updatePreviewDimensions(format, dimensions) {
       const width = Number(dimensions?.width);
       const height = Number(dimensions?.height);
       if (!width || !height) return;
-      if (controls.previewViewport) controls.previewViewport.style.aspectRatio = `${width} / ${height}`;
-      if (controls.previewFrame) {
-        controls.previewFrame.style.width = `${width}px`;
-        controls.previewFrame.style.height = `${height}px`;
+      const viewport = document.querySelector(`[data-preview-viewport][data-preview-format="${format}"]`);
+      const frame = document.querySelector(`[data-preview-frame="${format}"]`);
+      const targetViewport = viewport || (format === activeFormat ? document.querySelector('[data-preview-viewport]') : null);
+      const targetFrame = frame || (format === activeFormat ? document.querySelector('#previewFrame') : null);
+      if (targetViewport) targetViewport.style.aspectRatio = `${width} / ${height}`;
+      if (targetFrame) {
+        targetFrame.style.width = `${width}px`;
+        targetFrame.style.height = `${height}px`;
       }
-      legacyBridge?.resizePreview?.();
+      legacyBridge?.resizePreview?.(format);
     }
 
     function renderImageAdjustments(capabilities = {}) {
@@ -281,7 +306,7 @@
         publication, activeFormat, input.dataset.imageAdjustment, Number(input.value)
       );
       renderImageAdjustments(currentNodes().format?.capabilities);
-      if (previewState !== 'ready') return;
+      if (previewContexts[activeFormat].previewState !== 'ready') return;
       syncPublicationContentToPreview().catch(error => {
         if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar enquadramento:', error);
       });
@@ -290,13 +315,12 @@
     function resetCurrentImageAdjustments() {
       publication = state.resetImageAdjustments(publication, activeFormat);
       renderImageAdjustments(currentNodes().format?.capabilities);
-      if (previewState !== 'ready') return Promise.resolve(false);
+      if (previewContexts[activeFormat].previewState !== 'ready') return Promise.resolve(false);
       return syncPublicationContentToPreview();
     }
 
     function isStructuralSelectionCurrent(selection, requestId) {
-      return requestId === latestRendererRequest
-        && selection.format === activeFormat
+      return requestId === previewContexts[selection.format].rendererRequestId
         && selection.brand === publication.brand
         && selection.family === publication.family
         && selection.variant === publication.formats[selection.format].variant;
@@ -341,23 +365,26 @@
       }
     }
 
-    async function resolvePreview() {
-      const requestId = ++latestRendererRequest;
-      const format = activeFormat;
+    async function resolvePreview(format = activeFormat) {
+      const context = previewContexts[format];
+      const requestId = ++context.rendererRequestId;
       const selection = {
         brand: publication.brand,
         family: publication.family,
         variant: publication.formats[format].variant,
         format,
       };
-      setPreviewState('loading');
-      legacyBridge?.setContentSyncPending?.(true);
+      context.structuralSelection = selection;
+      setPreviewState(format, 'loading');
+      context.syncPending = true;
+      legacyBridge?.setContentSyncPending?.(true, format);
       setStatus('Atualizando preview');
       try {
         const resolved = await api.resolveEditorRenderer(selection);
         assertStructuralSelectionCurrent(selection, requestId);
-        renderer = resolved;
-        updatePreviewDimensions(resolved.dimensions);
+        context.renderer = resolved;
+        context.dimensions = resolved.dimensions;
+        updatePreviewDimensions(format, resolved.dimensions);
         if (legacyBridge) {
           const snapshot = readPublicationSnapshot(format);
           await legacyBridge.selectRenderer({
@@ -368,23 +395,32 @@
           await applyCurrentSnapshotUntilStable(selection, requestId, snapshot);
         }
         if (isStructuralSelectionCurrent(selection, requestId)) {
-          legacyBridge?.setContentSyncPending?.(false);
-          setPreviewState('ready');
+          context.syncPending = false;
+          legacyBridge?.setContentSyncPending?.(false, format);
+          setPreviewState(format, 'ready');
           setStatus('Pronto');
         }
+        legacyBridge?.setActiveFormat?.(activeFormat);
       } catch (error) {
-        if (requestId !== latestRendererRequest || error?.code === 'OPERATION_STALE') return;
-        renderer = null;
-        setPreviewState('error');
+        if (requestId !== context.rendererRequestId || error?.code === 'OPERATION_STALE') return;
+        context.renderer = null;
+        context.structuralSelection = null;
+        context.syncPending = false;
+        legacyBridge?.clearPreview?.(format);
+        setPreviewState(format, 'error');
         setStatus('Preview não pôde ser carregado');
       }
     }
 
     async function selectFormat(format) {
       if (format !== 'story' && format !== 'feed') return;
-      if (format === activeFormat && previewState === 'ready') return;
-      latestContentSyncId += 1;
+      if (viewMode !== 'compare' && activeFormat !== format) {
+        previewContexts[activeFormat].contentSyncId += 1;
+        previewContexts[activeFormat].syncPending = false;
+      }
+      viewMode = format;
       activeFormat = format;
+      legacyBridge?.setActiveFormat?.(activeFormat);
       const brand = catalogHelpers.findBrand(catalog, publication.brand);
       const family = catalogHelpers.findFamily(brand, publication.family);
       const variant = catalogHelpers.getVariants(family, format)
@@ -392,10 +428,11 @@
       if (!variant) {
         const selection = catalogHelpers.chooseForFamily(catalog, publication.brand, publication.family, format);
         if (!selection) {
-          latestRendererRequest += 1;
-          renderer = null;
-          setPreviewState('error');
-          legacyBridge?.clearPreview?.();
+          previewContexts[format].rendererRequestId += 1;
+          previewContexts[format].contentSyncId += 1;
+          previewContexts[format].renderer = null;
+          setPreviewState(format, 'error');
+          legacyBridge?.clearPreview?.(format);
           render();
           setStatus(`${formatLabel(format)} não disponível para esta configuração`);
           return;
@@ -403,7 +440,43 @@
         applySelection(selection);
       }
       render();
-      await resolvePreview();
+      await resolvePreview(format);
+    }
+
+    function invalidatePreviewContext(format, { clear = true } = {}) {
+      const context = previewContexts[format];
+      context.rendererRequestId += 1;
+      context.contentSyncId += 1;
+      context.renderer = null;
+      context.previewState = 'idle';
+      context.syncPending = false;
+      context.dimensions = null;
+      context.structuralSelection = null;
+      if (clear) legacyBridge?.clearPreview?.(format);
+    }
+
+    async function selectViewMode(mode) {
+      if (mode !== 'compare') return selectFormat(mode);
+      viewMode = 'compare';
+      legacyBridge?.setActiveFormat?.(activeFormat);
+      render();
+      legacyBridge?.setActiveFormat?.(activeFormat);
+      await Promise.all(['feed', 'story'].map(format => {
+        if (previewContexts[format].previewState === 'ready') return Promise.resolve();
+        const selection = catalogHelpers.chooseForFamily(catalog, publication.brand, publication.family, format);
+        if (!selection) {
+          previewContexts[format].rendererRequestId += 1;
+          previewContexts[format].contentSyncId += 1;
+          previewContexts[format].renderer = null;
+          setPreviewState(format, 'error');
+          legacyBridge?.clearPreview?.(format);
+          return Promise.resolve();
+        }
+        publication = state.setFormatVariant(publication, format, selection.variant.id);
+        publication = state.setFormatTheme(publication, format, selection.theme?.id || null);
+        return resolvePreview(format);
+      }));
+      render();
     }
 
     async function selectVariant(variantId) {
@@ -423,7 +496,7 @@
       if (!(format?.themes || []).some(theme => theme.id === themeId)) return;
       publication = state.setFormatTheme(publication, activeFormat, themeId);
       render();
-      if (previewState !== 'ready') return Promise.resolve(false);
+      if (previewContexts[activeFormat].previewState !== 'ready') return Promise.resolve(false);
       return syncPublicationContentToPreview().catch(error => {
         if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar tema:', error);
         return false;
@@ -437,9 +510,16 @@
         setStatus(`${formatLabel(activeFormat)} não disponível para esta configuração`);
         return;
       }
+      ['feed', 'story'].forEach(format => invalidatePreviewContext(format));
       applySelection(selection);
+      const otherFormat = activeFormat === 'feed' ? 'story' : 'feed';
+      const other = catalogHelpers.chooseForFamily(catalog, selection.brand.id, selection.family.id, otherFormat);
+      if (other) {
+        publication = state.setFormatVariant(publication, otherFormat, other.variant.id);
+        publication = state.setFormatTheme(publication, otherFormat, other.theme?.id || null);
+      }
       render();
-      await resolvePreview();
+      await (viewMode === 'compare' ? selectViewMode('compare') : resolvePreview());
     }
 
     async function selectFamily(familyId) {
@@ -449,9 +529,16 @@
         setStatus(`${formatLabel(activeFormat)} não disponível para esta configuração`);
         return;
       }
+      ['feed', 'story'].forEach(format => invalidatePreviewContext(format));
       applySelection(selection);
+      const otherFormat = activeFormat === 'feed' ? 'story' : 'feed';
+      const other = catalogHelpers.chooseForFamily(catalog, selection.brand.id, selection.family.id, otherFormat);
+      if (other) {
+        publication = state.setFormatVariant(publication, otherFormat, other.variant.id);
+        publication = state.setFormatTheme(publication, otherFormat, other.theme?.id || null);
+      }
       render();
-      await resolvePreview();
+      await (viewMode === 'compare' ? selectViewMode('compare') : resolvePreview());
     }
 
     function bindEvents() {
@@ -466,7 +553,7 @@
             legacyBridge?.setNewsImportPending?.(false);
           }
           reconcilePublicationContent(field.dataset.field);
-          if (previewState !== 'ready') return;
+          if (!['feed', 'story'].some(format => previewContexts[format].previewState === 'ready')) return;
           syncPublicationContentToPreview().catch(error => {
             if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar conteÃºdo:', error);
           });
@@ -480,18 +567,34 @@
         .forEach(input => input.addEventListener('input', () => updateImageAdjustment(input)));
       controls.resetImageAdjustments?.addEventListener('click', resetCurrentImageAdjustments);
       document.querySelector('[data-action="new-artwork"]')?.addEventListener('click', () => reset());
-      document.querySelectorAll('[data-view-mode="feed"], [data-view-mode="story"]')
-        .forEach(button => button.addEventListener('click', () => selectFormat(button.dataset.viewMode)));
-      document.querySelector('[data-view-mode="compare"]')
-        ?.addEventListener('click', () => setStatus('Em breve'));
+      document.querySelectorAll('[data-view-mode]')
+        .forEach(button => button.addEventListener('click', () => selectViewMode(button.dataset.viewMode)));
+      document.querySelectorAll('[data-select-preview-format]').forEach(button => {
+        button.addEventListener('click', () => {
+          if (viewMode !== 'compare') return;
+          activeFormat = button.dataset.selectPreviewFormat;
+          legacyBridge?.setActiveFormat?.(activeFormat);
+          render();
+          setPreviewState(activeFormat, previewContexts[activeFormat].previewState);
+        });
+      });
     }
 
     async function reset() {
-      latestRendererRequest += 1;
       latestNewsImportId += 1;
-      latestContentSyncId += 1;
+      Object.entries(previewContexts).forEach(([format, context]) => {
+        const hadAuthority = context.renderer || context.previewState !== 'idle';
+        context.rendererRequestId += 1;
+        context.contentSyncId += 1;
+        context.renderer = null;
+        context.previewState = 'idle';
+        context.syncPending = false;
+        context.dimensions = null;
+        context.structuralSelection = null;
+        if (hadAuthority) legacyBridge?.clearPreview?.(format);
+      });
       legacyBridge?.setNewsImportPending?.(false);
-      legacyBridge?.setContentSyncPending?.(true);
+      viewMode = INITIAL_FORMAT;
       activeFormat = INITIAL_FORMAT;
       publication = state.createPublication();
       document.querySelectorAll('[data-field]').forEach(field => { field.value = ''; });
@@ -503,12 +606,11 @@
       }
       applySelection(selection);
       render();
-      await resolvePreview();
-      if (previewState === 'ready') await syncPublicationContentToPreview();
+      await resolvePreview(INITIAL_FORMAT);
     }
 
     async function initialize() {
-      setPreviewState('idle');
+      setPreviewState(INITIAL_FORMAT, 'idle');
       setStatus('Carregando editor');
       bindEvents();
       try {
@@ -535,12 +637,15 @@
       selectTheme,
       selectVariant,
       selectFormat,
+      selectViewMode,
       resetCurrentImageAdjustments,
       getPublication: () => publication,
-      getRenderer: () => renderer,
-      getPreviewState: () => previewState,
-      getContentSyncId: () => latestContentSyncId,
+      getRenderer: (format = activeFormat) => previewContexts[format].renderer,
+      getPreviewState: (format = activeFormat) => previewContexts[format].previewState,
+      getContentSyncId: (format = activeFormat) => previewContexts[format].contentSyncId,
       getActiveFormat: () => activeFormat,
+      getViewMode: () => viewMode,
+      getPreviewContexts: () => previewContexts,
     };
   }
 

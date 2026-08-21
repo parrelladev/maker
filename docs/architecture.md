@@ -1,11 +1,11 @@
 # Arquitetura atual do Maker
 
-## Story, Feed e Compare operacionais
+## Story, Feed e Compare operacionais (fundação 11.0a)
 
 `viewMode` é estado transitório de UI e pode ser `story`, `feed` ou `compare`.
 `activeFormat` continua separado da `publication`: em modo single ele coincide
-com o painel visível; em Compare identifica o painel selecionado, o alvo dos
-controles da sidebar e o formato exportado por **Baixar atual**. Clicar no
+com o painel visível; em Compare identifica o painel selecionado e o alvo dos
+controles da sidebar. Clicar no
 seletor acessível de Feed ou Story muda esse alvo sem editar os dois formatos.
 
 Compare mantém uma única `publication` e apresenta simultaneamente suas duas
@@ -23,17 +23,9 @@ sem se invalidarem; dentro do mesmo formato, somente a versão mais recente tem
 autoridade. Conteúdo compartilhado sincroniza ambos em Compare, enquanto theme,
 variant e image adjustments sincronizam somente `activeFormat`.
 
-**Baixar atual** exige o contexto de `activeFormat`. **Baixar ambos** valida Feed
-e Story antes de qualquer captura, mantém o lock durante a transação e exporta
-diretamente os DOMs existentes como `maker-feed.png` (1080×1350) e
-`maker-story.png` (1080×1920).
-
-Exportabilidade possui um contrato único por formato: o renderer precisa estar
-`ready`, não pode haver content-sync pendente, frame e manifest precisam existir
-e o contexto técnico deve corresponder exatamente à seleção estrutural atual de
-brand, family, variant e format. Botões e guardas programáticas usam esse mesmo
-contrato. Um mutex compartilhado impede concorrência entre **Baixar atual** e
-**Baixar ambos** e é liberado em `finally`, sem remover outras razões de loading.
+Esta etapa não altera o contrato final de exportação: download-all, mutex e o
+status global definitivo permanecem para as etapas 11.0.1/11.0.2. Os dois DOMs
+reais e independentes constituem a base técnica para essa evolução posterior.
 
 Brand e family são compartilhados. Quando mudam, os contexts Feed e Story são
 invalidados antes de qualquer espera, suas versões antigas perdem autoridade e

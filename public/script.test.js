@@ -93,7 +93,11 @@ class BindingElement extends FakeElement {
   }
 }
 
-function createHarness({ autoResolveRuntime = true } = {}) {
+function createHarness({
+  autoPrepareDownload = true,
+  autoResolveRuntime = true,
+  includeFeedFrame = true
+} = {}) {
   jest.useFakeTimers();
 
   const ids = [
@@ -109,9 +113,11 @@ function createHarness({ autoResolveRuntime = true } = {}) {
     'customTag',
     'fetchDataBtn',
     'previewFrame',
+    'previewFrameFeed',
     'previewPlaceholder'
   ];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id)]));
+  if (!includeFeedFrame) delete elements.previewFrameFeed;
   elements.themeOptions = new FakeElement('themeOptions');
   const frameDocument = {
     open: jest.fn(),
@@ -124,13 +130,34 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   };
   elements.previewFrame.contentDocument = frameDocument;
   elements.previewFrame.contentWindow = { document: frameDocument };
+  const feedFrameDocument = {
+    open: jest.fn(),
+    write: jest.fn(),
+    close: jest.fn(() => {
+      if (autoResolveRuntime) {
+        elements.previewFrameFeed.contentWindow.__resolvePreviewRuntimeReady?.();
+      }
+    })
+  };
+  if (elements.previewFrameFeed) {
+    elements.previewFrameFeed.contentDocument = feedFrameDocument;
+    elements.previewFrameFeed.contentWindow = { document: feedFrameDocument };
+  }
 
   const previewWrapper = new FakeElement('preview-frame-wrapper');
+  previewWrapper.dataset.previewFormat = 'story';
+  const feedPreviewWrapper = new FakeElement('preview-frame-wrapper-feed');
+  feedPreviewWrapper.dataset.previewFormat = 'feed';
   const previewContainer = new FakeElement('preview-container');
+  previewWrapper.parentElement = previewContainer;
+  feedPreviewWrapper.parentElement = previewContainer;
   const documentListeners = {};
   const document = {
     getElementById: id => elements[id] || null,
     querySelector: selector => {
+      if (selector === '[data-preview-viewport][data-preview-format="story"]') return previewWrapper;
+      if (selector === '[data-preview-viewport][data-preview-format="feed"]') return feedPreviewWrapper;
+      if (selector === '[data-preview-placeholder="feed"]') return null;
       if (selector === '.preview-frame-wrapper') {
         return previewWrapper;
       }
@@ -187,6 +214,27 @@ function createHarness({ autoResolveRuntime = true } = {}) {
   vm.runInContext(source, context, { filename: 'public/script.js' });
   (documentListeners.DOMContentLoaded || []).forEach(listener => listener());
 
+  if (autoPrepareDownload) {
+    vm.runInContext(`
+      const selectRendererStateWithReadyContext = selectRendererState;
+      selectRendererState = function (renderer, theme, activeFormat) {
+        selectRendererStateWithReadyContext(renderer, theme, activeFormat);
+        const format = activeFormat || 'story';
+        const context = getPreviewContext(format);
+        context.manifestData = {
+          template: context.template,
+          page: context.page,
+          manifest: { dimensions: { width: 1080, height: format === 'feed' ? 1350 : 1920 } },
+          css: [],
+          html: ''
+        };
+        context.initializedTemplate = context.template;
+        context.initializedPage = context.page;
+        window.LegacyEditorBridge.setEditorPreviewReady(format, true);
+      };
+    `, context);
+  }
+
   function run(expression) {
     return vm.runInContext(expression, context);
   }
@@ -211,6 +259,8 @@ function createHarness({ autoResolveRuntime = true } = {}) {
     previewWrapper,
     extractNewsData,
     frameDocument,
+    feedFrameDocument,
+    feedPreviewWrapper,
     loadManifest,
     run,
     state
@@ -218,10 +268,152 @@ function createHarness({ autoResolveRuntime = true } = {}) {
 }
 
 describe('exportação do formato editorial visível', () => {
+  function configureReadyContext(harness, format, manifestData, {
+    initializedTemplate = manifestData.template,
+    initializedPage = manifestData.page || 'index',
+    ready = true
+  } = {}) {
+    harness.context.__exportManifest = manifestData;
+    harness.elements[format === 'feed' ? 'previewFrameFeed' : 'previewFrame']
+      .contentWindow.__updatePreview = jest.fn();
+    harness.run(`
+      previewContexts.${format}.template = __exportManifest.template;
+      previewContexts.${format}.page = __exportManifest.page || 'index';
+      previewContexts.${format}.manifestData = __exportManifest;
+      previewContexts.${format}.initializedTemplate = ${JSON.stringify(initializedTemplate)};
+      previewContexts.${format}.initializedPage = ${JSON.stringify(initializedPage)};
+      previewContexts.${format}.ready = ${JSON.stringify(ready)};
+      window.LegacyEditorBridge.setActiveFormat(${JSON.stringify(format)});
+    `);
+  }
+
+  function fillValidExportData(harness) {
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({ chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==' });
+  }
+
+  test('readiness de Story não autoriza download do context Feed', async () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    fillValidExportData(harness);
+    const feedManifest = { template: 'feed-renderer', page: 'index', manifest: {}, css: [], html: '' };
+    configureReadyContext(harness, 'story', { ...feedManifest, template: 'story-renderer' });
+    configureReadyContext(harness, 'feed', feedManifest, { ready: false });
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['manifest ausente', context => { context.manifestData = null; }],
+    ['inicialização stale', context => { context.initializedTemplate = 'feed-antigo'; }]
+  ])('bloqueia Feed com %s', async (_name, invalidate) => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    fillValidExportData(harness);
+    configureReadyContext(harness, 'feed', {
+      template: 'feed-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    harness.context.invalidateExportContext = invalidate;
+    harness.run('invalidateExportContext(previewContexts.feed)');
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['feed', 'previewFrameFeed', 1350],
+    ['story', 'previewFrame', 1920]
+  ])('download %s usa exatamente frame e manifest do próprio context', async (format, frameId, height) => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    fillValidExportData(harness);
+    const manifest = {
+      template: `${format}-renderer`, page: 'index',
+      manifest: { dimensions: { width: 1080, height } }, css: [], html: ''
+    };
+    configureReadyContext(harness, format, manifest);
+    harness.loadManifest.mockClear();
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview)
+      .toHaveBeenCalledWith(harness.elements[frameId], manifest, expect.any(String));
+    expect(harness.loadManifest).not.toHaveBeenCalled();
+  });
+
+  test('pending é consultado somente para o formato exportado', async () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    fillValidExportData(harness);
+    configureReadyContext(harness, 'story', {
+      template: 'story-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    harness.run(`window.LegacyEditorBridge.setContentSyncPending(true, 'feed')`);
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+    harness.run(`window.LegacyEditorBridge.setContentSyncPending(true, 'story')`);
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    ['readiness', `window.LegacyEditorBridge.setEditorPreviewReady('feed', false)`],
+    ['content sync pending', `window.LegacyEditorBridge.setContentSyncPending(true, 'feed')`],
+    ['manifest', `previewContexts.feed.manifestData = { template: 'feed-renderer', page: 'index', manifest: {}, css: [], html: '' }`],
+    ['frame', `previewContexts.feed.frame = previewFrame`]
+  ])('Feed não exporta quando %s perde autoridade durante await', async (_name, mutation) => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    const extraction = createDeferred();
+    fillValidExportData(harness);
+    configureReadyContext(harness, 'feed', {
+      template: 'feed-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    harness.extractNewsData.mockReturnValue(extraction.promise);
+
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    harness.run(mutation);
+    extraction.resolve({ chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==' });
+    await generation;
+
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test('Story não exporta quando perde readiness durante await', async () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    const extraction = createDeferred();
+    fillValidExportData(harness);
+    configureReadyContext(harness, 'story', {
+      template: 'story-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    harness.extractNewsData.mockReturnValue(extraction.promise);
+
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    harness.run(`window.LegacyEditorBridge.setEditorPreviewReady('story', false)`);
+    extraction.resolve({ chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==' });
+    await generation;
+
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test('Compare preserva export Feed quando apenas Story muda durante await', async () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    const extraction = createDeferred();
+    fillValidExportData(harness);
+    const feedManifest = { template: 'feed-renderer', page: 'index', manifest: {}, css: [], html: '' };
+    configureReadyContext(harness, 'story', {
+      template: 'story-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    configureReadyContext(harness, 'feed', feedManifest);
+    harness.extractNewsData.mockReturnValue(extraction.promise);
+
+    const generation = harness.run('generateArtWithPreviewFlow()');
+    harness.run(`window.LegacyEditorBridge.setEditorPreviewReady('story', false)`);
+    extraction.resolve({ chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==' });
+    await generation;
+
+    expect(harness.context.PreviewExport.downloadPreview)
+      .toHaveBeenCalledWith(harness.elements.previewFrameFeed, feedManifest, expect.any(String));
+  });
+
   test('exporta Feed 1080x1350 e depois Story 1080x1920 sem estado residual', async () => {
     const harness = createHarness();
-    const updatePreview = jest.fn();
-    harness.elements.previewFrame.contentWindow.__updatePreview = updatePreview;
+    const storyUpdatePreview = jest.fn();
+    const feedUpdatePreview = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = storyUpdatePreview;
+    harness.elements.previewFrameFeed.contentWindow.__updatePreview = feedUpdatePreview;
     harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.extractNewsData.mockResolvedValue({
       chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==',
@@ -244,9 +436,9 @@ describe('exportação do formato editorial visível', () => {
 
     const feedManifest = harness.context.PreviewExport.downloadPreview.mock.calls[0][1];
     expect(harness.context.PreviewExport.downloadPreview.mock.calls[0][0])
-      .toBe(harness.elements.previewFrame);
+      .toBe(harness.elements.previewFrameFeed);
     expect(feedManifest.manifest.dimensions).toEqual({ width: 1080, height: 1350 });
-    expect(updatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(feedUpdatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
       activeFormat: 'feed', imageAdjustments: { zoom: 1.3, x: 30, y: 70 },
     }));
     expect(harness.state()).toMatchObject({
@@ -264,7 +456,7 @@ describe('exportação do formato editorial visível', () => {
     expect(harness.context.PreviewExport.downloadPreview.mock.calls[1][0])
       .toBe(harness.elements.previewFrame);
     expect(storyManifest.manifest.dimensions).toEqual({ width: 1080, height: 1920 });
-    expect(updatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(storyUpdatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
       activeFormat: 'story', imageAdjustments: { zoom: 1.1, x: 45, y: 55 },
     }));
     expect(harness.state()).toMatchObject({
@@ -272,6 +464,59 @@ describe('exportação do formato editorial visível', () => {
       currentImageAdjustments: { zoom: 1.1, x: 45, y: 55 },
     });
     expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(2);
+  });
+
+  test('bridge keeps Story and Feed bound to distinct frames after a Story sync', async () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    const storyUpdate = jest.fn();
+    const feedUpdate = jest.fn();
+    harness.elements.previewFrame.contentWindow.__updatePreview = storyUpdate;
+    harness.elements.previewFrameFeed.contentWindow.__updatePreview = feedUpdate;
+    harness.loadManifest.mockImplementation((template, page) => Promise.resolve({
+      template, page, manifest: { dimensions: { width: 1080, height: template === 'feed-renderer' ? 1350 : 1920 } },
+      css: [], html: `<main>${template}</main>`,
+    }));
+    await harness.run(`window.LegacyEditorBridge.selectRenderer({ renderer: { template: 'story-renderer', page: 'index', themes: [] }, activeFormat: 'story', theme: 'dark', content: { title: 'Story' }, imageAdjustments: { zoom: 1, x: 50, y: 50 }, assertCurrent: function () {} })`);
+    await harness.run(`window.LegacyEditorBridge.selectRenderer({ renderer: { template: 'feed-renderer', page: 'index', themes: [] }, activeFormat: 'feed', theme: 'blue', content: { title: 'Feed' }, imageAdjustments: { zoom: 1.2, x: 40, y: 60 }, assertCurrent: function () {} })`);
+    storyUpdate.mockClear();
+    feedUpdate.mockClear();
+    await harness.run(`window.LegacyEditorBridge.applyPublicationContent({ activeFormat: 'story', theme: 'dark', content: { title: 'Story atual' }, imageAdjustments: { zoom: 1.1, x: 45, y: 55 }, assertCurrent: function () {} })`);
+    expect(storyUpdate).toHaveBeenCalledWith(expect.objectContaining({ activeFormat: 'story', h1: 'Story atual' }));
+    expect(feedUpdate).not.toHaveBeenCalled();
+    expect(harness.run(`JSON.stringify({ story: previewContexts.story.template, feed: previewContexts.feed.template })`))
+      .toBe('{"story":"story-renderer","feed":"feed-renderer"}');
+    expect(harness.frameDocument.write.mock.calls.some(([html]) => html.includes('story-renderer'))).toBe(true);
+    expect(harness.feedFrameDocument.write.mock.calls.some(([html]) => html.includes('feed-renderer'))).toBe(true);
+  });
+
+  test('content sync pending is independent per format', () => {
+    const harness = createHarness();
+    harness.run(`window.LegacyEditorBridge.setContentSyncPending(true, 'feed'); window.LegacyEditorBridge.setContentSyncPending(true, 'story'); window.LegacyEditorBridge.setContentSyncPending(false, 'feed')`);
+    expect(harness.run('JSON.stringify(contentSyncPending)')).toBe('{"feed":false,"story":true}');
+    harness.run(`window.LegacyEditorBridge.setContentSyncPending(false, 'story')`);
+    expect(harness.run('JSON.stringify(contentSyncPending)')).toBe('{"feed":false,"story":false}');
+  });
+
+  test('download current in Compare follows the explicitly active format', async () => {
+    const harness = createHarness();
+    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+    harness.elements.previewFrameFeed.contentWindow.__updatePreview = jest.fn();
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
+    harness.extractNewsData.mockResolvedValue({ chapeu: 'Categoria', bg: 'data:image/png;base64,QQ==' });
+    harness.loadManifest.mockImplementation((template, page) => Promise.resolve({ template, page, manifest: { dimensions: { width: 1080, height: template === 'feed-renderer' ? 1350 : 1920 } }, css: [], html: '' }));
+    harness.run(`selectRendererState({ template: 'story-renderer', page: 'index', themes: [] }, null, 'story'); selectRendererState({ template: 'feed-renderer', page: 'index', themes: [] }, null, 'feed'); window.LegacyEditorBridge.setActiveFormat('feed')`);
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview.mock.calls[0][0]).toBe(harness.elements.previewFrameFeed);
+    harness.run(`window.LegacyEditorBridge.setActiveFormat('story')`);
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview.mock.calls[1][0]).toBe(harness.elements.previewFrame);
+  });
+
+  test('missing Feed frame never falls back to Story export', async () => {
+    const harness = createHarness({ includeFeedFrame: false });
+    harness.run(`selectRendererState({ template: 'feed-renderer', page: 'index', themes: [] }, null, 'feed')`);
+    await harness.run('generateArtWithPreviewFlow()');
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
   });
 });
 
@@ -910,7 +1155,21 @@ test('publication flows through real controller and bridge to iframe DOM and sam
     },
     legacyBridge: {
       ...parent.context.LegacyEditorBridge,
-      selectRenderer: jest.fn().mockResolvedValue(),
+      selectRenderer: jest.fn(({ renderer, activeFormat, theme }) => {
+        parent.context.__resolvedManifestData = {
+          template: renderer.template, page: renderer.page, manifest, css: [], html: ''
+        };
+        parent.run(`
+          previewContexts.${activeFormat}.template = ${JSON.stringify('binding-fixture')};
+          previewContexts.${activeFormat}.page = 'index';
+          previewContexts.${activeFormat}.theme = ${JSON.stringify(null)};
+          previewContexts.${activeFormat}.manifestData = __resolvedManifestData;
+          previewContexts.${activeFormat}.initializedTemplate = ${JSON.stringify('binding-fixture')};
+          previewContexts.${activeFormat}.initializedPage = 'index';
+        `);
+        parent.context.LegacyEditorBridge.setActiveFormat(activeFormat);
+        return Promise.resolve();
+      }),
     },
   });
   await controller.initialize();
@@ -973,6 +1232,8 @@ describe('readiness editorial e exportação legada', () => {
 
   test('guarda programatica impede export durante content-sync', async () => {
     const harness = createHarness();
+    harness.run(`selectRendererState({ template: 'story-renderer', page: 'index', themes: [] }, null, 'story')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.run('window.LegacyEditorBridge.setContentSyncPending(true)');
     await harness.run('generateArtWithPreviewFlow()');
     expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
@@ -1058,6 +1319,8 @@ describe('readiness editorial e exportação legada', () => {
   });
   test('guarda de profundidade impede download enquanto o preview editorial não está pronto', async () => {
     const harness = createHarness();
+    harness.run(`selectRendererState({ template: 'story-renderer', page: 'index', themes: [] }, null, 'story')`);
+    harness.elements.newsUrl.value = 'https://example.com/noticia';
     harness.run('window.LegacyEditorBridge.setEditorPreviewReady(false)');
 
     await harness.run('generateArtWithPreviewFlow()');
@@ -1163,7 +1426,7 @@ describe('contrato de estado de public/script.js', () => {
   });
 
   test('inicializa manifest e iframe uma vez e os reaproveita para o mesmo template', async () => {
-    const harness = createHarness();
+    const harness = createHarness({ autoPrepareDownload: false });
     const manifestData = {
       template: 'agazeta-foto-abaixo',
       page: 'index',
@@ -1333,7 +1596,7 @@ describe('atualizações auxiliares do preview', () => {
   });
 
   test('ignora falha auxiliar de preview pertencente a uma sessão antiga', async () => {
-    const harness = createHarness({ autoResolveRuntime: false });
+    const harness = createHarness({ autoPrepareDownload: false, autoResolveRuntime: false });
     const documentWritten = createDeferred();
     harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
     harness.frameDocument.write.mockImplementation(html => {
@@ -1356,7 +1619,7 @@ describe('atualizações auxiliares do preview', () => {
   });
 
   test('ignora falha auxiliar de uma inicialização substituída na mesma sessão', async () => {
-    const harness = createHarness({ autoResolveRuntime: false });
+    const harness = createHarness({ autoPrepareDownload: false, autoResolveRuntime: false });
     const firstDocumentWritten = createDeferred();
     const secondDocumentWritten = createDeferred();
     harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
@@ -1400,7 +1663,7 @@ describe('atualizações auxiliares do preview', () => {
   });
 
   test('não aplica atualização auxiliar antiga que resolve depois da mais nova existir', async () => {
-    const harness = createHarness({ autoResolveRuntime: false });
+    const harness = createHarness({ autoPrepareDownload: false, autoResolveRuntime: false });
     const firstDocumentWritten = createDeferred();
     const secondDocumentWritten = createDeferred();
     harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
@@ -1762,7 +2025,7 @@ describe('validacoes atuais da geracao', () => {
 
     await harness.run('generateArtWithPreviewFlow()');
 
-    expect(harness.loadManifest).toHaveBeenCalledWith('layout-hz', 'index');
+    expect(harness.loadManifest).not.toHaveBeenCalled();
     expect(harness.extractNewsData).toHaveBeenCalledWith('https://example.com/noticia');
     expect(harness.elements.toastContainer.children).toHaveLength(1);
     expect(harness.elements.toastContainer.children[0].innerHTML).toContain(message);
@@ -1841,7 +2104,13 @@ describe('validacoes atuais da geracao', () => {
     const expectedPayload = harness.run(
       `buildPreviewData(${JSON.stringify(manifestData)}, ${JSON.stringify(embeddedImage)})`
     );
-    expect(updatePreview).toHaveBeenLastCalledWith(expectedPayload);
+    expect(updatePreview).toHaveBeenLastCalledWith(expect.objectContaining({
+      h1: expectedPayload.h1,
+      h2: expectedPayload.h2,
+      tag: expectedPayload.tag,
+      bg: expectedPayload.bg,
+      themeName: expectedPayload.themeName
+    }));
     expect(expectedPayload).toMatchObject({
       h1: 'Titulo manual',
       h2: 'Subtitulo extraido',
@@ -2325,46 +2594,6 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });
 
-  test('aguarda readiness e aplica o payload antes de iniciar a exportação', async () => {
-    const harness = createHarness();
-    const readiness = createDeferred();
-    const readinessStarted = createDeferred();
-    const events = [];
-    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
-    harness.elements.newsUrl.value = 'https://example.com/noticia';
-    harness.extractNewsData.mockResolvedValue({
-      chapeu: 'Categoria',
-      bg: 'data:image/png;base64,QQ=='
-    });
-    harness.context.waitForRuntime = jest.fn(async ({ manifestData }) => {
-      readinessStarted.resolve();
-      await readiness.promise;
-      events.push('runtime-ready');
-      return manifestData;
-    });
-    harness.run('ensurePreviewInitialized = waitForRuntime');
-    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn(() => {
-      events.push('payload-applied');
-    });
-    harness.context.PreviewExport.downloadPreview.mockImplementation(() => {
-      events.push('download-started');
-    });
-
-    const generation = harness.run('generateArtWithPreviewFlow()');
-    await readinessStarted.promise;
-
-    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
-
-    readiness.resolve();
-    await generation;
-
-    expect(events).toEqual([
-      'runtime-ready',
-      'payload-applied',
-      'download-started'
-    ]);
-  });
-
   test('bloqueia exportação quando a aplicação do payload final falha', async () => {
     const harness = createHarness();
     harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
@@ -2455,129 +2684,7 @@ describe('validacoes atuais da geracao', () => {
     expect(harness.elements.generateBtn.disabled).toBe(false);
   });
 
-  test.each(['carregamento', 'inicialização'])(
-    'restaura a interface quando falha a readiness de %s do runtime',
-    async () => {
-      const harness = createHarness({ autoResolveRuntime: false });
-      const documentWritten = createDeferred();
-      harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
-      harness.elements.newsUrl.value = 'https://example.com/noticia';
-      harness.extractNewsData.mockResolvedValue({
-        chapeu: 'Categoria',
-        bg: 'data:image/png;base64,QQ=='
-      });
-      harness.frameDocument.write.mockImplementation(html => {
-        if (html.includes('preview-runtime.js')) documentWritten.resolve();
-      });
-
-      const generation = harness.run('generateArtWithPreviewFlow()');
-      await documentWritten.promise;
-      harness.elements.previewFrame.contentWindow.__rejectPreviewRuntimeReady(
-        new Error('Falha ao inicializar o runtime do preview')
-      );
-      await generation;
-
-      expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
-      expectNoSuccessToast(harness);
-      expect(harness.elements.toastContainer.children.at(-1).innerHTML)
-        .toContain('Falha ao inicializar o runtime do preview');
-      expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
-      expect(harness.elements.generateBtn.disabled).toBe(false);
-      expect(harness.state()).toMatchObject({
-        currentManifestData: null,
-        previewInitializedTemplate: null
-      });
-    }
-  );
-
-  test('refaz a inicialização e exporta depois de uma falha do runtime', async () => {
-    const harness = createHarness({ autoResolveRuntime: false });
-    const firstDocument = createDeferred();
-    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
-    harness.elements.newsUrl.value = 'https://example.com/noticia';
-    harness.extractNewsData.mockResolvedValue({
-      chapeu: 'Categoria',
-      bg: 'data:image/png;base64,QQ=='
-    });
-    harness.frameDocument.write.mockImplementation(html => {
-      if (html.includes('preview-runtime.js')) firstDocument.resolve();
-    });
-
-    const firstGeneration = harness.run('generateArtWithPreviewFlow()');
-    await firstDocument.promise;
-    harness.elements.previewFrame.contentWindow.__rejectPreviewRuntimeReady(
-      new Error('Falha ao inicializar o runtime do preview')
-    );
-    await firstGeneration;
-
-    const secondDocument = createDeferred();
-    harness.frameDocument.write.mockImplementation(html => {
-      if (html.includes('preview-runtime.js')) secondDocument.resolve();
-    });
-    const secondGeneration = harness.run('generateArtWithPreviewFlow()');
-    await secondDocument.promise;
-    harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
-    harness.elements.previewFrame.contentWindow.__resolvePreviewRuntimeReady();
-    await secondGeneration;
-
-    const runtimeDocuments = harness.frameDocument.write.mock.calls
-      .filter(([html]) => html.includes('preview-runtime.js'));
-    expect(runtimeDocuments).toHaveLength(2);
-    expect(harness.context.PreviewExport.downloadPreview).toHaveBeenCalledTimes(1);
-    expect(harness.elements.previewFrame.contentWindow.__updatePreview)
-      .toHaveBeenCalled();
-    expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
-    expect(harness.elements.generateBtn.disabled).toBe(false);
-  });
-
-  test.each(['resolvida', 'rejeitada'])(
-    'ignora readiness %s depois de a geração se tornar obsoleta',
-    async readinessOutcome => {
-      const harness = createHarness({ autoResolveRuntime: false });
-      const documentWritten = createDeferred();
-      harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
-      harness.elements.newsUrl.value = 'https://example.com/noticia';
-      harness.extractNewsData.mockResolvedValue({
-        chapeu: 'Categoria',
-        bg: 'data:image/png;base64,QQ=='
-      });
-      harness.frameDocument.write.mockImplementation(html => {
-        if (html.includes('preview-runtime.js')) documentWritten.resolve();
-      });
-
-      const generation = harness.run('generateArtWithPreviewFlow()');
-      await documentWritten.promise;
-      const oldFrameWindow = harness.elements.previewFrame.contentWindow;
-      const settleOldRuntime = readinessOutcome === 'resolvida'
-        ? () => oldFrameWindow.__resolvePreviewRuntimeReady()
-        : () => oldFrameWindow.__rejectPreviewRuntimeReady(
-          new Error('Falha ao inicializar o runtime do preview')
-        );
-
-      harness.run(`selectRendererState({ template: 'rede-gazeta', page: 'index', themes: [] }, null)`);
-      settleOldRuntime();
-      await generation;
-
-      expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
-      expect(harness.elements.toastContainer.children).toHaveLength(0);
-      expect(harness.state()).toMatchObject({
-        currentTemplate: 'rede-gazeta',
-        currentManifestData: null,
-        previewInitializedTemplate: null
-      });
-      expect(harness.elements.loadingOverlay.classList.contains('show')).toBe(false);
-      expect(harness.elements.generateBtn.disabled).toBe(false);
-    }
-  );
-
   test.each([
-    {
-      name: 'loadManifest',
-      prepare: harness => {
-        harness.loadManifest.mockRejectedValue(new Error('manifest indisponivel'));
-      },
-      errorMessage: 'manifest indisponivel'
-    },
     {
       name: 'Api.embedImage',
       prepare: harness => {
@@ -2588,19 +2695,6 @@ describe('validacoes atuais da geracao', () => {
         harness.context.Api.embedImage.mockRejectedValue(new Error('imagem indisponivel'));
       },
       errorMessage: 'imagem indisponivel'
-    },
-    {
-      name: 'ensurePreviewInitialized',
-      prepare: harness => {
-        harness.extractNewsData.mockResolvedValue({
-          chapeu: 'Categoria',
-          bg: 'data:image/png;base64,QQ=='
-        });
-        harness.context.rejectPreviewInitialization = jest.fn()
-          .mockRejectedValue(new Error('preview indisponivel'));
-        harness.run('ensurePreviewInitialized = rejectPreviewInitialization');
-      },
-      errorMessage: 'preview indisponivel'
     },
     {
       name: 'PreviewExport.downloadPreview',

@@ -30,12 +30,18 @@ function fixture() {
     status: new FakeElement(), newArtwork: new FakeElement(), feed: new FakeElement(), story: new FakeElement(), compare: new FakeElement(),
     downloadCurrent: new FakeElement(), importNews: new FakeElement(),
     imageAdjustments: new FakeElement(), resetImageAdjustments: new FakeElement(),
+    previewStage: new FakeElement(), feedPanel: new FakeElement(), storyPanel: new FakeElement(),
+    feedPanelSelector: new FakeElement(), storyPanelSelector: new FakeElement(),
   };
   elements.feed.dataset.viewMode = 'feed';
   elements.story.dataset.viewMode = 'story';
   elements.compare.dataset.viewMode = 'compare';
   elements.previewViewport = new FakeElement();
   elements.previewFrame = new FakeElement();
+  elements.feedPanel.dataset.previewPanel = 'feed';
+  elements.storyPanel.dataset.previewPanel = 'story';
+  elements.feedPanelSelector.dataset.selectPreviewFormat = 'feed';
+  elements.storyPanelSelector.dataset.selectPreviewFormat = 'story';
   elements.status.statusText = new FakeElement();
   const fields = ['url', 'title', 'subtitle', 'tag', 'image'].map(name => {
     const field = new FakeElement(); field.dataset.field = name; return field;
@@ -54,6 +60,7 @@ function fixture() {
     '[data-action="reset-image-adjustments"]': elements.resetImageAdjustments,
     '[data-preview-viewport]': elements.previewViewport,
     '#previewFrame': elements.previewFrame,
+    '[data-preview-stage]': elements.previewStage,
     '[data-view-mode="feed"]': elements.feed,
     '[data-view-mode="story"]': elements.story,
     '[data-view-mode="compare"]': elements.compare,
@@ -68,6 +75,8 @@ function fixture() {
       if (selector === '[data-field]') return fields;
       if (selector === '[data-image-adjustment]') return adjustmentInputs;
       if (selector === '[data-view-mode]') return [elements.feed, elements.story, elements.compare];
+      if (selector === '[data-preview-panel]') return [elements.feedPanel, elements.storyPanel];
+      if (selector === '[data-select-preview-format]') return [elements.feedPanelSelector, elements.storyPanelSelector];
       if (selector.includes('data-view-mode')) return [elements.feed, elements.story];
       return [];
     },
@@ -121,7 +130,7 @@ function setup(overrides = {}) {
   const legacyBridge = {
     selectRenderer: jest.fn().mockResolvedValue(),
     selectTheme: jest.fn(),
-    setEditorPreviewReady: jest.fn(ready => setDisabled('editor-preview', !ready)),
+    setEditorPreviewReady: jest.fn((_format, ready) => setDisabled('editor-preview', !ready)),
     importNews: jest.fn().mockResolvedValue({ h1: 'Imported title', h2: 'Imported subtitle', chapeu: 'Imported tag', bg: 'image-data' }),
     applyPublicationContent: jest.fn().mockResolvedValue(),
     setNewsImportPending: jest.fn(pending => setDisabled('news-import', pending)),
@@ -1001,9 +1010,98 @@ describe('controller/UI editorial', () => {
     expect(harness.controller.getActiveFormat()).toBe('feed');
     expect(harness.controller.getRenderer()).toBeNull();
     expect(harness.controller.getPreviewState()).toBe('error');
-    expect(harness.legacyBridge.clearPreview).toHaveBeenCalledTimes(1);
+    expect(harness.legacyBridge.clearPreview).toHaveBeenLastCalledWith('feed');
     expect(harness.elements.status.statusText.textContent)
       .toBe('Feed não disponível para esta configuração');
     expect(harness.elements.downloadCurrent.disabled).toBe(true);
+  });
+
+  test('starts in Story and Compare keeps two independent real contexts', async () => {
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    const storyRenderer = harness.controller.getRenderer('story');
+    expect(harness.controller.getViewMode()).toBe('story');
+    expect(harness.controller.getActiveFormat()).toBe('story');
+    await harness.controller.selectViewMode('compare');
+    expect(harness.controller.getViewMode()).toBe('compare');
+    expect(harness.elements.feedPanel.hidden).toBe(false);
+    expect(harness.elements.storyPanel.hidden).toBe(false);
+    expect(harness.controller.getRenderer('story')).toBe(storyRenderer);
+    expect(harness.controller.getPreviewState('feed')).toBe('ready');
+    expect(harness.controller.getPreviewState('story')).toBe('ready');
+  });
+
+  test('Compare panel selection changes activeFormat and sidebar target', async () => {
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    await harness.controller.selectViewMode('compare');
+    await harness.elements.feedPanelSelector.dispatch('click');
+    expect(harness.controller.getActiveFormat()).toBe('feed');
+    expect(harness.controller.getViewMode()).toBe('compare');
+    await harness.elements.storyPanelSelector.dispatch('click');
+    expect(harness.controller.getActiveFormat()).toBe('story');
+  });
+
+  test('Compare content changes start independent Feed and Story syncs', async () => {
+    let finishFeed; let finishStory;
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    await harness.controller.selectViewMode('compare');
+    harness.legacyBridge.applyPublicationContent.mockImplementation(({ activeFormat, assertCurrent }) => new Promise(resolve => {
+      const finish = () => { assertCurrent(); resolve(); };
+      if (activeFormat === 'feed') finishFeed = finish; else finishStory = finish;
+    }));
+    harness.fields[1].value = 'Compartilhado';
+    await harness.fields[1].dispatch('input');
+    expect(finishFeed).toEqual(expect.any(Function));
+    expect(finishStory).toEqual(expect.any(Function));
+    finishFeed(); await Promise.resolve();
+    expect(harness.controller.getPreviewContexts().story.syncPending).toBe(true);
+    finishStory(); await Promise.resolve(); await Promise.resolve();
+    expect(harness.controller.getPreviewContexts().feed.syncPending).toBe(false);
+    expect(harness.controller.getPreviewContexts().story.syncPending).toBe(false);
+  });
+
+  test('Nova arte invalidates both contexts and returns to Story', async () => {
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    await harness.controller.selectViewMode('compare');
+    const feedId = harness.controller.getContentSyncId('feed');
+    const storyId = harness.controller.getContentSyncId('story');
+    await harness.controller.reset();
+    expect(harness.controller.getViewMode()).toBe('story');
+    expect(harness.controller.getActiveFormat()).toBe('story');
+    expect(harness.controller.getContentSyncId('feed')).toBeGreaterThan(feedId);
+    expect(harness.controller.getContentSyncId('story')).toBeGreaterThan(storyId);
+    expect(harness.legacyBridge.clearPreview).toHaveBeenCalledWith('feed');
+    expect(harness.legacyBridge.clearPreview).toHaveBeenCalledWith('story');
+  });
+
+  test('a late Feed resolve cannot beat a newer Feed resolve or damage Story', async () => {
+    let resolveA; let resolveB;
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    harness.api.resolveEditorRenderer.mockImplementationOnce(() => new Promise(resolve => { resolveA = resolve; }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveB = resolve; }));
+    const pendingA = harness.controller.selectFormat('feed');
+    const pendingB = harness.controller.selectFormat('feed');
+    resolveB({ template: 'feed-b', page: 'index', dimensions: { width: 1080, height: 1350 } });
+    await pendingB;
+    resolveA({ template: 'feed-a', page: 'index', dimensions: { width: 1080, height: 1350 } });
+    await pendingA;
+    expect(harness.controller.getRenderer('feed').template).toBe('feed-b');
+    expect(harness.controller.getRenderer('story').template).toBe('renderer-z');
+  });
+
+  test('Feed resolve failure clears only Feed and leaves Story ready', async () => {
+    const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+    await harness.controller.initialize();
+    harness.api.resolveEditorRenderer.mockRejectedValueOnce(new Error('feed failed'));
+    await harness.controller.selectFormat('feed');
+    expect(harness.controller.getRenderer('feed')).toBeNull();
+    expect(harness.controller.getPreviewState('feed')).toBe('error');
+    expect(harness.controller.getRenderer('story').template).toBe('renderer-z');
+    expect(harness.controller.getPreviewState('story')).toBe('ready');
+    expect(harness.legacyBridge.clearPreview).toHaveBeenLastCalledWith('feed');
   });
 });
