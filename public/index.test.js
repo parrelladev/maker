@@ -50,6 +50,13 @@ describe('shell do editor', () => {
     expect($(`label[for="${id}"]`)).toHaveLength(1);
   });
 
+  test('mantém somente os controles funcionais da seção de imagem', () => {
+    expect($('[data-field="image"]#customImageUrl')).toHaveLength(1);
+    expect($('[data-action="replace-image"], [data-current-image]')).toHaveLength(0);
+    expect($('[data-control="image-adjustments"]')).toHaveLength(1);
+    expect($('[data-action="reset-image-adjustments"]')).toHaveLength(1);
+  });
+
   test('prepara controles de configuração sem catálogo definitivo', () => {
     expect($('[data-control="brand"]')).toHaveLength(1);
     expect($('[data-control="family"]')).toHaveLength(1);

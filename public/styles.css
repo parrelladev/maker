@@ -456,53 +456,6 @@ textarea:focus-visible {
 
 
 /* =========================================================
-   CURRENT IMAGE
-========================================================= */
-
-.current-image {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  align-items: center;
-
-  gap: 7px;
-
-  margin-bottom: 7px;
-}
-
-.current-image > span {
-  display: grid;
-  place-items: center;
-
-  width: 36px;
-  aspect-ratio: 1;
-
-  overflow: hidden;
-
-  border-radius: 5px;
-
-  background: var(--stage);
-  color: var(--muted);
-
-  font-size: 8px;
-}
-
-.current-image p {
-  min-width: 0;
-
-  margin: 0;
-
-  overflow: hidden;
-
-  color: var(--muted);
-
-  font-size: 10px;
-
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-/* =========================================================
    IMAGE ADJUSTMENTS
 ========================================================= */
 
