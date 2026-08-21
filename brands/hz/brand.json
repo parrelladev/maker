@@ -1,0 +1,15 @@
+{
+  "id": "hz",
+  "name": "HZ",
+  "logos": {
+    "primary": "logos/primary.png"
+  },
+  "fonts": {
+    "headline": {
+      "black": "fonts/headline-black.woff2"
+    },
+    "body": {
+      "italic": "fonts/body-italic.woff2"
+    }
+  }
+}

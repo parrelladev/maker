@@ -134,6 +134,15 @@ describe('renderers editoriais reais da A Gazeta', () => {
 });
 
 describe('caracterização do renderer legado HZ Story', () => {
+  test('HZ registrada ainda nao participa do catalogo editorial nem resolve renderer', async () => {
+    const catalog = await buildEditorCatalog();
+
+    expect(catalog.brands).not.toContainEqual(expect.objectContaining({ id: 'hz' }));
+    expect(() => resolveRenderer(catalog, {
+      brand: 'hz', family: 'padrao', variant: 'foto-acima', format: 'story',
+    })).toThrow(expect.objectContaining({ code: 'EDITOR_CATALOG_RENDERER_NOT_FOUND' }));
+  });
+
   test('preserva manifest, assets e precedência determinística dos CSS atuais', async () => {
     const page = await loadTemplatePage('layout-hz', 'index');
 

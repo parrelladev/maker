@@ -188,6 +188,13 @@ resolve aliases com confinamento à pasta da marca. A representação de listage
 expõe somente `id` e `name`; paths absolutos permanecem internos ao loader. O
 registry ainda não está exposto por HTTP nem integrado ao editor.
 
+HZ está registrada no Brand Registry para preparação da migração. Seu logo PNG
+e suas referências próprias de fontes ficam em `brands/hz`; o renderer legado
+continua usando `input/logo-hz.png` e as fontes locais. Como HZ ainda não possui
+manifest editorial, ela não aparece no catálogo, no resolver nem na UI. Os
+themes Rosa e Amarelo e suas cores continuam pertencendo ao renderer legado e
+ao futuro nível Theme, não à marca global.
+
 Marca e template são responsabilidades separadas: logos e fontes pertencem à
 marca; composição pertence à variante; dimensões pertencem ao formato; tema
 não deve ser confundido com identidade estrutural. Os templates existentes

@@ -1,4 +1,6 @@
 const path = require('path');
+const fs = require('fs').promises;
+const crypto = require('crypto');
 const {
   createBrandRegistry,
   loadBrand: loadDefaultBrand,
@@ -154,5 +156,56 @@ describe('brandRegistry', () => {
       .toBe(path.resolve('brands/agazeta/logos/primary.svg'));
     await expect(resolveDefaultBrandFont('agazeta', 'headline.black')).resolves
       .toBe(path.resolve('brands/agazeta/fonts/headline-black.woff2'));
+  });
+
+  test('registry padrao lista HZ e resolve seus assets sem cruzar aliases com A Gazeta', async () => {
+    const { listBrands } = require('./brandRegistry');
+
+    await expect(listBrands()).resolves.toEqual([
+      { id: 'agazeta', name: 'A Gazeta' },
+      { id: 'hz', name: 'HZ' }
+    ]);
+    await expect(loadDefaultBrand('hz')).resolves.toEqual({
+      id: 'hz',
+      name: 'HZ',
+      logos: { primary: 'logos/primary.png' },
+      fonts: {
+        headline: { black: 'fonts/headline-black.woff2' },
+        body: { italic: 'fonts/body-italic.woff2' }
+      }
+    });
+
+    const [hzLogo, hzHeadline, hzBody, agazetaLogo, agazetaHeadline] = await Promise.all([
+      resolveDefaultBrandLogo('hz', 'primary'),
+      resolveDefaultBrandFont('hz', 'headline.black'),
+      resolveDefaultBrandFont('hz', 'body.italic'),
+      resolveDefaultBrandLogo('agazeta', 'primary'),
+      resolveDefaultBrandFont('agazeta', 'headline.black')
+    ]);
+
+    expect(hzLogo).toBe(path.resolve('brands/hz/logos/primary.png'));
+    expect(hzHeadline).toBe(path.resolve('brands/hz/fonts/headline-black.woff2'));
+    expect(hzBody).toBe(path.resolve('brands/hz/fonts/body-italic.woff2'));
+    expect(hzLogo).not.toBe(agazetaLogo);
+    expect(hzHeadline).not.toBe(agazetaHeadline);
+    await expect(resolveDefaultBrandLogo('hz', 'secondary')).rejects.toMatchObject({
+      code: 'BRAND_LOGO_NOT_FOUND'
+    });
+  });
+
+  test('assets HZ preservam o PNG e os bytes das fontes comprovados no renderer legado', async () => {
+    const digest = async filePath => crypto
+      .createHash('sha256')
+      .update(await fs.readFile(path.resolve(filePath)))
+      .digest('hex');
+    const logo = await fs.readFile(path.resolve('brands/hz/logos/primary.png'));
+
+    expect(logo.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(logo.readUInt32BE(16)).toBe(2697);
+    expect(logo.readUInt32BE(20)).toBe(1080);
+    await expect(digest('brands/hz/fonts/headline-black.woff2'))
+      .resolves.toBe(await digest('templates/layout-hz/fonts/Maga-Black.woff2'));
+    await expect(digest('brands/hz/fonts/body-italic.woff2'))
+      .resolves.toBe(await digest('templates/layout-hz/fonts/Montserrat-Italic.woff2'));
   });
 });
