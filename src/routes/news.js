@@ -48,21 +48,7 @@ router.post('/extract', async (req, res) => {
 
   try {
     const { h1, h2, bg, chapeu } = await newsScraper.fetch(url);
-    let embeddedBg = null;
-
-    if (bg) {
-      try {
-        embeddedBg = await embedImage(bg);
-      } catch (error) {
-        const publicError = getPublicRemoteError(error, {
-          fallbackCode: 'IMAGE_DOWNLOAD_FAILED',
-        });
-        logRequestError('news.extract-image', req, error, {
-          status: 200,
-          code: publicError.code,
-        });
-      }
-    }
+    const embeddedBg = bg ? await embedImage(bg) : null;
 
     return res.json({ h1, h2, bg: embeddedBg, bgSource: bg, chapeu });
   } catch (error) {

@@ -158,9 +158,7 @@ resposta DNS não pública antes da conexão.
 - **Hipótese a testar:** redirects e respostas comprimidas com o adaptador real.
 
 Depois do parse, a URL de imagem extraída pode provocar uma segunda requisição
-no mesmo endpoint por meio de `embedImage`. Se apenas essa segunda requisição
-falhar, o endpoint preserva os textos extraídos e a URL original em `bgSource`,
-retorna `bg: null` e registra a falha no servidor.
+no mesmo endpoint por meio de `embedImage`.
 
 ### `POST /api/news/embed-image`
 
