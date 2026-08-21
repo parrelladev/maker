@@ -13,11 +13,20 @@ const NEWS_URL_ERROR_CODES = new Set([
   'UNSUPPORTED_PROTOCOL',
   'URL_CREDENTIALS',
 ]);
+const REQUIRED_NEWS_FIELDS = ['h1', 'h2', 'chapeu', 'bg'];
 
 const router = express.Router();
 
+function hasRequiredNewsContent(news) {
+  return REQUIRED_NEWS_FIELDS.every(
+    (field) => typeof news?.[field] === 'string' && news[field].trim() !== ''
+  );
+}
+
 async function embedImage(imageUrl) {
-  if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) {
+    throw new SafeHttpError('REQUEST_FAILED');
+  }
 
   try {
     const response = await safeHttpClient.get(imageUrl, {
@@ -47,11 +56,30 @@ router.post('/extract', async (req, res) => {
   }
 
   try {
-    const { h1, h2, bg, chapeu } = await newsScraper.fetch(url);
-    const embeddedBg = bg ? await embedImage(bg) : null;
+    const scrapedNews = await newsScraper.fetch(url);
+
+    if (!hasRequiredNewsContent(scrapedNews)) {
+      const error = new Error('Extração de notícia incompleta');
+      error.code = 'NEWS_EXTRACTION_INCOMPLETE';
+      throw error;
+    }
+
+    const { h1, h2, bg, chapeu } = scrapedNews;
+    const embeddedBg = await embedImage(bg);
 
     return res.json({ h1, h2, bg: embeddedBg, bgSource: bg, chapeu });
   } catch (error) {
+    if (error?.code === 'NEWS_EXTRACTION_INCOMPLETE') {
+      logRequestError('news.extract', req, error, {
+        status: 422,
+        code: error.code,
+      });
+      return res.status(422).json({
+        error: 'Não foi possível extrair todos os dados necessários da notícia',
+        code: error.code,
+      });
+    }
+
     const publicError = getPublicRemoteError(error, {
       fallbackCode: 'NEWS_EXTRACTION_FAILED',
     });

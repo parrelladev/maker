@@ -176,7 +176,9 @@ tamanho, MIME inesperado, corpo vazio, assinatura incompatível, erro inesperado
 sem exposição do detalhe, redirect público e bloqueio de destinos não públicos,
 inclusive após redirect. Ela também confirma a data URL, categorias inválidas de
 URL da notícia convertidas em 400 e a mensagem estável quando a incorporação
-ocorre dentro de `/extract`.
+ocorre dentro de `/extract`. A completude atômica de `h1`, `h2`, `chapeu` e
+`bg` é verificada com respostas simuladas, incluindo valores ausentes, vazios e
+com apenas whitespace, sem iniciar o download da imagem nesses casos.
 
 A suíte de `src/lib/assetResolver.external.test.js` caracteriza SVG remoto com
 o cliente compartilhado mockado. Ela registra timeout, limite de resposta e

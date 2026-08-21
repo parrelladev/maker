@@ -86,6 +86,11 @@ Resposta:
 }
 ```
 
+A importação só responde com sucesso quando título, subtítulo, chapéu e
+imagem estão presentes e a imagem foi validada e incorporada. Conteúdo
+incompleto retorna `422 NEWS_EXTRACTION_INCOMPLETE` sem dados editoriais
+parciais.
+
 O download do PNG não possui endpoint: ele acontece no navegador.
 
 ## Templates

@@ -101,7 +101,7 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
         h1: 'Título',
         h2: 'Subtítulo',
         bg: publicUrl,
-        chapeu: null,
+        chapeu: 'Cotidiano',
       });
       mockImageResponse();
 
@@ -111,9 +111,65 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
       expect(body).toMatchObject({
         h1: 'Título',
         h2: 'Subtítulo',
+        chapeu: 'Cotidiano',
         bg: `data:image/png;base64,${PNG_IMAGE.toString('base64')}`,
         bgSource: publicUrl,
       });
+    });
+  });
+
+  test.each([
+    ['bg', null],
+    ['h1', undefined],
+    ['h2', ''],
+    ['chapeu', '   '],
+  ])(
+    'rejeita extração sem %s antes de tentar incorporar a imagem',
+    async (field, invalidValue) => {
+      await withNewsServer(async (baseUrl) => {
+        const scrapedNews = {
+          h1: 'Título completo',
+          h2: 'Subtítulo completo',
+          chapeu: 'Cotidiano',
+          bg: publicUrl,
+        };
+        scrapedNews[field] = invalidValue;
+        require('../services/newsScraper').fetch.mockResolvedValue(scrapedNews);
+
+        const { response, body } = await postNews(baseUrl, publicUrl);
+
+        expect(response.status).toBe(422);
+        expect(body).toEqual({
+          error: 'Não foi possível extrair todos os dados necessários da notícia',
+          code: 'NEWS_EXTRACTION_INCOMPLETE',
+        });
+        expect(body).not.toHaveProperty('h1');
+        expect(body).not.toHaveProperty('h2');
+        expect(body).not.toHaveProperty('chapeu');
+        expect(body).not.toHaveProperty('bg');
+        expect(require('../lib/safeHttpClient').get).not.toHaveBeenCalled();
+      });
+    }
+  );
+
+  test('rejeita imagem presente que não pode ser baixada e incorporada', async () => {
+    await withNewsServer(async (baseUrl) => {
+      require('../services/newsScraper').fetch.mockResolvedValue({
+        h1: 'Título completo',
+        h2: 'Subtítulo completo',
+        chapeu: 'Cotidiano',
+        bg: '/imagem-relativa.jpg',
+      });
+
+      const { response, body } = await postNews(baseUrl, publicUrl);
+
+      expect(response.status).toBe(500);
+      expect(body).toMatchObject({ code: 'REQUEST_FAILED' });
+      expect(body).not.toHaveProperty('h1');
+      expect(body).not.toHaveProperty('h2');
+      expect(body).not.toHaveProperty('chapeu');
+      expect(body).not.toHaveProperty('bg');
+      expect(require('../lib/safeHttpClient').get).not.toHaveBeenCalled();
     });
   });
 
@@ -227,9 +283,9 @@ describe('incorporação de imagem com respostas HTTP simuladas', () => {
     await withNewsServer(async (baseUrl) => {
       require('../services/newsScraper').fetch.mockResolvedValue({
         h1: 'Título',
-        h2: null,
+        h2: 'Subtítulo',
         bg: publicUrl,
-        chapeu: null,
+        chapeu: 'Cotidiano',
       });
       require('../lib/safeHttpClient').get.mockResolvedValue({
         data: Buffer.from('private upstream response'),

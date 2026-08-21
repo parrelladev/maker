@@ -659,8 +659,10 @@ caracteres, subtítulo a 220 e chapéu a 80.
 
 Na resposta bem-sucedida, quando a imagem encontrada é uma URL HTTP ou HTTPS,
 `bg` contém a imagem incorporada e `bgSource` conserva a URL extraída.
-Referências relativas são preservadas em ambos os campos, sem resolução contra
-a URL da notícia. A resposta também contém `h1`, `h2` e `chapeu`. Ausência da
+A resposta também contém `h1`, `h2` e `chapeu`. Os quatro
+campos são obrigatórios e precisam ser strings não vazias; a rota rejeita o
+resultado incompleto com `422 NEWS_EXTRACTION_INCOMPLETE` antes de iniciar o
+download da imagem e sem retornar dados editoriais parciais. Ausência da
 URL gera HTTP 400; URL inválida, protocolo não permitido ou credenciais
 embutidas também geram HTTP 400. Falha de download, parsing ou incorporação
 gera HTTP 500.
@@ -693,8 +695,8 @@ Quando o valor encontrado pelo scraper é uma URL HTTP ou HTTPS, `embedImage` em
 usa timeout de 15 segundos, limite de 12 MB durante o recebimento, até três
 redirecionamentos e exige PNG, JPEG, GIF ou WebP com assinatura básica
 compatível com o `Content-Type`. O buffer vira
-`data:<tipo>;base64,...`. Referências relativas de imagem não passam por esse
-download e são preservadas sem resolução contra a URL da notícia.
+`data:<tipo>;base64,...`. Referências que não sejam HTTP(S) são rejeitadas,
+pois não podem cumprir o contrato de download, validação e incorporação.
 
 Assim, normalmente a imagem extraída já chega ao navegador incorporada e não
 depende de CORS durante a captura.
