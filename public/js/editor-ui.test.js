@@ -155,6 +155,59 @@ function setup(overrides = {}) {
 }
 
 describe('controller/UI editorial', () => {
+  test('descobre HZ pelo catalogo, preserva conteudo e oferece somente Story com Rosa default', async () => {
+    const catalog = { brands: [{
+      id: 'agazeta', name: 'A Gazeta', families: [{
+        id: 'padrao', label: 'padrao', variants: [{
+          id: 'foto-acima', label: 'Foto acima', formats: [{
+            id: 'story', dimensions: { width: 1080, height: 1920 },
+            themes: [{ id: 'azul', label: 'Azul' }],
+          }],
+        }],
+      }],
+    }, {
+      id: 'hz', name: 'HZ', families: [{
+        id: 'noticia', label: 'noticia', variants: [{
+          id: 'foto-card', label: 'Foto card', formats: [{
+            id: 'story', dimensions: { width: 1080, height: 1920 },
+            themes: [{ id: 'rosa', label: 'Rosa' }, { id: 'amarelo', label: 'Amarelo' }],
+          }],
+        }],
+      }],
+    }] };
+    const harness = setup({ api: {
+      getEditorCatalog: jest.fn().mockResolvedValue(catalog),
+      resolveEditorRenderer: jest.fn(selection => Promise.resolve({
+        template: selection.brand === 'hz' ? 'layout-hz' : 'agazeta-foto-acima',
+        page: 'index', dimensions: { width: 1080, height: 1920 }, themes: [],
+      })),
+    } });
+    await harness.controller.initialize();
+    harness.fields[1].value = 'Titulo compartilhado';
+    await harness.fields[1].dispatch('input');
+    await harness.controller.selectBrand('hz');
+
+    expect(harness.elements.brand.children.map(option => option.value)).toEqual(['agazeta', 'hz']);
+    expect(harness.controller.getPublication()).toMatchObject({
+      brand: 'hz', family: 'noticia', content: { title: 'Titulo compartilhado' },
+      formats: { story: { variant: 'foto-card', theme: 'rosa' } },
+    });
+    expect(harness.elements.themes.children.map(button => button.dataset.themeId))
+      .toEqual(['rosa', 'amarelo']);
+    expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
+      renderer: expect.objectContaining({ template: 'layout-hz', page: 'index' }),
+      activeFormat: 'story', theme: 'rosa',
+      content: expect.objectContaining({ title: 'Titulo compartilhado' }),
+    }));
+    await harness.controller.selectTheme('amarelo');
+    expect(harness.controller.getPublication().formats.story.theme).toBe('amarelo');
+    await harness.controller.selectFormat('feed');
+    expect(harness.controller.getRenderer('feed')).toBeNull();
+    expect(harness.elements.status.statusText.textContent).toContain('Feed não disponível');
+    await expect(harness.controller.downloadAll()).resolves.toBe(false);
+    expect(harness.legacyBridge.downloadExport).not.toHaveBeenCalled();
+  });
+
   test('mostra controles suportados, altera publication e reseta sem resolver renderer', async () => {
     const harness = setup();
     await harness.controller.initialize();
@@ -406,6 +459,36 @@ describe('controller/UI editorial', () => {
     expect(harness.disableReasons.has('content-sync')).toBe(true);
     expect(harness.elements.downloadCurrent.disabled).toBe(true);
     expect(errorSpy).toHaveBeenCalledWith('Erro ao sincronizar tema:', expect.any(Error));
+    errorSpy.mockRestore();
+  });
+
+  test('retry do mesmo theme continua bloqueando export ate o stylesheet concluir', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    let finishRetry;
+    const harness = setup();
+    await harness.controller.initialize();
+    harness.legacyBridge.applyPublicationContent.mockReset()
+      .mockRejectedValueOnce(new Error('stylesheet failed'))
+      .mockImplementationOnce(({ assertCurrent }) => new Promise(resolve => {
+        finishRetry = () => { assertCurrent(); resolve(); };
+      }));
+
+    await harness.controller.selectTheme('black');
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+
+    harness.fields[1].value = 'Retry do mesmo theme';
+    await harness.fields[1].dispatch('input');
+    await Promise.resolve();
+    expect(harness.controller.getPublication().formats.story.theme).toBe('black');
+    expect(harness.disableReasons.has('content-sync')).toBe(true);
+    expect(harness.elements.downloadCurrent.disabled).toBe(true);
+
+    finishRetry();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(harness.disableReasons.has('content-sync')).toBe(false);
+    expect(harness.elements.downloadCurrent.disabled).toBe(false);
+    expect(harness.elements.status.statusText.textContent).toBe('Pronto');
     errorSpy.mockRestore();
   });
 

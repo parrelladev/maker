@@ -38,7 +38,19 @@ function createRendererBrandAssetResolver({
   async function resolveLogo(brandId, alias) {
     if (!alias) return null;
     const assetPath = await resolveBrandLogoFn(brandId, alias);
-    if (pathModule.extname(assetPath).toLowerCase() !== '.svg') {
+    const extension = pathModule.extname(assetPath).toLowerCase();
+    if (extension === '.png') {
+      const data = await fileSystem.readFile(assetPath);
+      const pngSignature = Buffer.from('89504e470d0a1a0a', 'hex');
+      if (data.length === 0 || data.length > SVG_MAX_BYTES || !data.subarray(0, 8).equals(pngSignature)) {
+        throw new RendererBrandAssetError(
+          'RENDERER_BRAND_LOGO_INVALID',
+          `Logo PNG de marca inválido: ${alias}`
+        );
+      }
+      return { kind: 'image', src: `data:image/png;base64,${data.toString('base64')}` };
+    }
+    if (extension !== '.svg') {
       throw new RendererBrandAssetError(
         'RENDERER_BRAND_LOGO_TYPE_UNSUPPORTED',
         `Logo de marca não suportada pelo renderer: ${alias}`

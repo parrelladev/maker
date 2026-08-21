@@ -40,7 +40,7 @@ function rendererRef(template, page, dimensions, themes, capabilities) {
     template,
     page,
     dimensions: { ...dimensions },
-    themes: themes.map(theme => ({ ...theme })).sort(compareIds),
+    themes: themes.map(theme => ({ ...theme })),
     ...capabilitiesProperty(capabilities),
   };
 }
@@ -140,7 +140,7 @@ async function buildEditorCatalog({
           variantNode.formats.set(format, {
             id: format,
             dimensions: { ...formatMetadata.dimensions },
-            themes: metadata.themes.map(theme => ({ ...theme })).sort(compareIds),
+            themes: metadata.themes.map(theme => ({ ...theme })),
             ...capabilitiesProperty(formatMetadata.capabilities),
           });
         }

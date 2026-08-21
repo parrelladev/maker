@@ -1,13 +1,33 @@
 {
   "name": "Layout HZ",
-  "dimensions": { "width": 1080, "height": 1920 },
+  "editor": {
+    "brand": "hz",
+    "family": "noticia",
+    "variant": "foto-card",
+    "label": "Foto card"
+  },
+  "formats": {
+    "story": {
+      "dimensions": { "width": 1080, "height": 1920 }
+    }
+  },
+  "themes": [
+    { "id": "rosa", "label": "Rosa" },
+    { "id": "amarelo", "label": "Amarelo" }
+  ],
+  "brandAssets": {
+    "logo": "primary",
+    "fonts": [
+      { "alias": "headline.black", "family": "Maga Black", "weight": 900, "style": "normal" },
+      { "alias": "body.italic", "family": "Montserrat", "weight": 400, "style": "italic" }
+    ]
+  },
   "logoField": "logo",
   "defaultLogo": "logo-hz.png",
   "bindings": [
     { "selector": "#bg", "type": "image", "field": "resolvedBg", "required": true },
     { "selector": "#logo", "type": "logo", "field": "resolvedLogo", "required": true },
     { "selector": "#title", "type": "text", "field": "h1" },
-    { "selector": "#subtitle", "type": "text", "field": "h2" },
     { "selector": "#tag", "type": "text", "field": "tag" }
   ],
   "cssVars": [],

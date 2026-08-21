@@ -20,6 +20,35 @@ describe('API editorial', () => {
   beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
   afterEach(() => jest.restoreAllMocks());
 
+  test('publica HZ Story no catalogo e resolve o renderer real sem fallback para Feed', async () => {
+    await withServer(createEditorRouter(), async baseUrl => {
+      const catalogResponse = await fetch(`${baseUrl}/api/editor/catalog`);
+      const catalog = await catalogResponse.json();
+      const hz = catalog.brands.find(brand => brand.id === 'hz');
+      expect(hz.families[0].variants[0].formats).toEqual([expect.objectContaining({
+        id: 'story', dimensions: { width: 1080, height: 1920 },
+        themes: [{ id: 'rosa', label: 'Rosa' }, { id: 'amarelo', label: 'Amarelo' }],
+      })]);
+
+      const selection = { brand: 'hz', family: 'noticia', variant: 'foto-card' };
+      const story = await fetch(`${baseUrl}/api/editor/resolve`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...selection, format: 'story' }),
+      });
+      expect(story.status).toBe(200);
+      expect(await story.json()).toMatchObject({
+        template: 'layout-hz', page: 'index', dimensions: { width: 1080, height: 1920 },
+      });
+
+      const feed = await fetch(`${baseUrl}/api/editor/resolve`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...selection, format: 'feed' }),
+      });
+      expect(feed.status).toBe(404);
+      expect(await feed.json()).toMatchObject({ code: 'EDITOR_RENDERER_NOT_FOUND' });
+    });
+  });
+
   test('expõe somente o catálogo público e reutiliza a instância na resolução', async () => {
     const catalog = { brands: [{ id: 'brand-x', name: 'X', families: [] }] };
     const buildCatalog = jest.fn().mockResolvedValue(catalog);

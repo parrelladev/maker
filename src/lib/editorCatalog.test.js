@@ -123,8 +123,8 @@ describe('editorCatalog', () => {
               id: 'story',
               dimensions: { width: 1080, height: 1920 },
               themes: [
-                { id: 'azul', label: 'Azul' },
                 { id: 'preto', label: 'Preto' },
+                { id: 'azul', label: 'Azul' },
               ],
             }],
           }],

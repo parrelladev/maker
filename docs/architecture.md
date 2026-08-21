@@ -188,12 +188,29 @@ resolve aliases com confinamento à pasta da marca. A representação de listage
 expõe somente `id` e `name`; paths absolutos permanecem internos ao loader. O
 registry ainda não está exposto por HTTP nem integrado ao editor.
 
-HZ está registrada no Brand Registry para preparação da migração. Seu logo PNG
-e suas referências próprias de fontes ficam em `brands/hz`; o renderer legado
-continua usando `input/logo-hz.png` e as fontes locais. Como HZ ainda não possui
-manifest editorial, ela não aparece no catálogo, no resolver nem na UI. Os
-themes Rosa e Amarelo e suas cores continuam pertencendo ao renderer legado e
-ao futuro nível Theme, não à marca global.
+HZ está disponível editorialmente como `HZ → noticia → foto-card → Story`,
+resolvendo para o mesmo renderer técnico `layout-hz/index`. O formato único tem
+1080×1920 e declara os themes Rosa e Amarelo; Rosa aparece primeiro e é o
+default somente para preservar o comportamento legado, não por inferência de
+guideline de marca. HZ não oferece Feed nesta etapa.
+
+O caminho editorial resolve o logo PNG `primary` e as fontes
+`headline.black`/`body.italic` pelo Brand Registry. Logos SVG continuam
+sanitizadas e incorporadas como markup; PNGs são validados por extensão,
+assinatura e limite antes de serem incorporados como data URL, sem passar pelo
+sanitizador SVG. `input/logo-hz.png`, as fontes locais e o loader
+`GET /api/templates/layout-hz/index` permanecem disponíveis para compatibilidade
+técnica. O discovery legado de `/api/templates` também permanece inalterado.
+
+O renderer HZ continua sem subtítulo visual e usa apenas title, tag e image.
+Ele não declara capability de zoom/posição enquanto esses controles não forem
+suportados sem interferir no transform estrutural da foto. Feed HZ será tratado
+em etapa posterior; Square não faz parte do roadmap atual.
+
+Atualizações do binding `themeStylesheet` participam da readiness genérica do
+preview: a sincronização aguarda o evento `load`, rejeita `error` e invalida a
+espera anterior quando outro theme assume autoridade. Assim, preview pronto e
+exportação só são liberados depois que o stylesheet selecionado está carregado.
 
 Marca e template são responsabilidades separadas: logos e fontes pertencem à
 marca; composição pertence à variante; dimensões pertencem ao formato; tema

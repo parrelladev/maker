@@ -134,12 +134,24 @@ describe('renderers editoriais reais da A Gazeta', () => {
 });
 
 describe('caracterização do renderer legado HZ Story', () => {
-  test('HZ registrada ainda nao participa do catalogo editorial nem resolve renderer', async () => {
+  test('HZ participa do catalogo somente como noticia/foto-card/Story e resolve o mesmo renderer', async () => {
     const catalog = await buildEditorCatalog();
-
-    expect(catalog.brands).not.toContainEqual(expect.objectContaining({ id: 'hz' }));
+    const hz = catalog.brands.find(({ id }) => id === 'hz');
+    expect(hz).toEqual({
+      id: 'hz', name: 'HZ', families: [{
+        id: 'noticia', label: 'noticia', variants: [{
+          id: 'foto-card', label: 'Foto card', formats: [{
+            id: 'story', dimensions: { width: 1080, height: 1920 },
+            themes: [{ id: 'rosa', label: 'Rosa' }, { id: 'amarelo', label: 'Amarelo' }],
+          }],
+        }],
+      }],
+    });
+    expect(resolveRenderer(catalog, {
+      brand: 'hz', family: 'noticia', variant: 'foto-card', format: 'story',
+    })).toMatchObject({ template: 'layout-hz', page: 'index' });
     expect(() => resolveRenderer(catalog, {
-      brand: 'hz', family: 'padrao', variant: 'foto-acima', format: 'story',
+      brand: 'hz', family: 'noticia', variant: 'foto-card', format: 'feed',
     })).toThrow(expect.objectContaining({ code: 'EDITOR_CATALOG_RENDERER_NOT_FOUND' }));
   });
 
@@ -148,7 +160,7 @@ describe('caracterização do renderer legado HZ Story', () => {
 
     expect(page.manifest).toMatchObject({
       name: 'Layout HZ',
-      editorial: null,
+      editorial: { brand: 'hz', family: 'noticia', variant: 'foto-card', label: 'Foto card' },
       dimensions: { width: 1080, height: 1920 },
       logoField: 'logo',
       defaultLogo: 'logo-hz.png',
@@ -156,7 +168,6 @@ describe('caracterização do renderer legado HZ Story', () => {
         { selector: '#bg', type: 'image', field: 'resolvedBg', required: true },
         { selector: '#logo', type: 'logo', field: 'resolvedLogo', required: true },
         { selector: '#title', type: 'text', field: 'h1' },
-        { selector: '#subtitle', type: 'text', field: 'h2' },
         { selector: '#tag', type: 'text', field: 'tag' },
       ],
       attributes: [
@@ -166,7 +177,14 @@ describe('caracterização do renderer legado HZ Story', () => {
     });
     expect(page.manifest).not.toHaveProperty('capabilities');
     expect(page.manifest).not.toHaveProperty('defaults');
-    expect(page.manifest).not.toHaveProperty('themes');
+    expect(page.manifest.themes).toEqual([
+      { id: 'rosa', label: 'Rosa' }, { id: 'amarelo', label: 'Amarelo' },
+    ]);
+    expect(page.manifest.formats).toEqual({
+      story: { dimensions: { width: 1080, height: 1920 } },
+    });
+    expect(page.manifest.brandAssets.fonts.map(({ alias }) => alias))
+      .toEqual(['headline.black', 'body.italic']);
 
     expect(page.html).toContain('id="themeStylesheet" href="../css/theme-rosa.css"');
     expect(page.html).toContain('id="bg"');
@@ -176,19 +194,22 @@ describe('caracterização do renderer legado HZ Story', () => {
     expect(page.html).not.toContain('id="subtitle"');
 
     expect(page.css.map(({ name }) => name)).toEqual([
+      'brand-fonts.css',
       path.join('css', 'base.css'),
       path.join('css', 'theme-amarelo.css'),
       path.join('css', 'theme-rosa.css'),
     ]);
-    expect(page.css[0].content).toContain("font-family: 'Maga Black'");
-    expect(page.css[0].content).toContain('padding-top: 1100px');
-    expect(page.css[1].content).toContain('--bg-top: #e39303');
-    expect(page.css[2].content).toContain('--bg-top: #ff0053');
+    expect(page.css[0].content).toContain('data:font/woff2;base64,');
+    expect(page.css[1].content).toContain("font-family: 'Maga Black'");
+    expect(page.css[1].content).toContain('padding-top: 1100px');
+    expect(page.css[2].content).toContain('--bg-top: #e39303');
+    expect(page.css[3].content).toContain('--bg-top: #ff0053');
 
     const aggregatedCss = page.css.map(({ content }) => content).join('\n');
     expect(aggregatedCss.lastIndexOf('--bg-top: #ff0053'))
       .toBeGreaterThan(aggregatedCss.lastIndexOf('--bg-top: #e39303'));
-    expect(page.resolvedLogo).toEqual({ kind: 'image', src: '/input/logo-hz.png' });
+    expect(page.resolvedLogo).toMatchObject({ kind: 'image' });
+    expect(page.resolvedLogo.src).toMatch(/^data:image\/png;base64,/);
 
     const logo = await fs.readFile(path.resolve('input/logo-hz.png'));
     expect(logo.subarray(1, 4).toString('ascii')).toBe('PNG');

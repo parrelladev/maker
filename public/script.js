@@ -311,11 +311,11 @@ async function ensurePreviewInitialized({
           }
 
           runtime.initialize(${manifestJson});
-          pendingUpdates.forEach(function (data) {
-            runtime.update(data);
-          });
+          var pendingReady = Promise.all(pendingUpdates.map(function (data) {
+            return runtime.update(data);
+          }));
           pendingUpdates = [];
-          resolveReady();
+          pendingReady.then(resolveReady, rejectReady);
         } catch (error) {
           rejectRuntime();
         }
@@ -456,7 +456,7 @@ function applyArtworkDataToPreview(artworkData, activeFormat = currentFormat) {
     throw new Error('O runtime do preview não está disponível');
   }
 
-  frameWindow.__updatePreview(artworkData);
+  return Promise.resolve(frameWindow.__updatePreview(artworkData));
 }
 
 function isBestEffortPreviewContextCurrent(context) {
@@ -519,7 +519,8 @@ async function updatePreview(
       manifestData, backgroundOverride, undefined, null, contentOverride, imageAdjustments, activeFormat, context.theme
     );
     if (assertCurrent) assertCurrent();
-    applyArtworkDataToPreview(artworkData, activeFormat);
+    await applyArtworkDataToPreview(artworkData, activeFormat);
+    if (assertCurrent) assertCurrent();
   } catch (error) {
     if (isStaleOperationError(error)) return;
     if (assertCurrent) assertCurrent();
