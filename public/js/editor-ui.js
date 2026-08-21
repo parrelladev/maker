@@ -63,6 +63,28 @@
         && legacyBridge?.isFormatExportable?.(format, context.renderer));
     }
 
+    function isFormatPreviewCoherent(format) {
+      const context = previewContexts[format];
+      return Boolean(context
+        && context.previewState === 'ready'
+        && context.syncPending === false
+        && context.renderer
+        && sameStructuralSelection(context.structuralSelection, currentStructuralSelection(format)));
+    }
+
+    function refreshPreviewStatus() {
+      const relevantFormats = viewMode === 'compare' ? ['feed', 'story'] : [viewMode];
+      const contexts = relevantFormats.map(format => previewContexts[format]);
+      let status = 'Atualizando preview';
+      if (relevantFormats.every(isFormatPreviewCoherent)) {
+        status = 'Pronto';
+      } else if (contexts.some(context => context?.previewState === 'error')) {
+        status = 'Preview não pôde ser carregado';
+      }
+      setStatus(status);
+      return status;
+    }
+
     function refreshExportButtons() {
       if (controls.downloadCurrent) {
         controls.downloadCurrent.disabled = exportPending || !isFormatExportable(activeFormat);
@@ -113,6 +135,7 @@
         exportPending = false;
         legacyBridge?.setExportPending?.(false);
         refreshExportButtons();
+        refreshPreviewStatus();
       }
     }
 
@@ -203,6 +226,7 @@
       legacyBridge?.setContentSyncPending?.(true, format);
       refreshExportButtons();
       if (pendingStatus) setStatus(pendingStatus);
+      else refreshPreviewStatus();
 
       try {
         await legacyBridge.applyPublicationContent({
@@ -213,7 +237,7 @@
         context.syncPending = false;
         legacyBridge?.setContentSyncPending?.(false, format);
         refreshExportButtons();
-        if (readyStatus) setStatus(readyStatus);
+        if (readyStatus) refreshPreviewStatus();
         return true;
       } catch (error) {
         if (syncId !== context.contentSyncId || error?.code === 'OPERATION_STALE') return false;
@@ -222,10 +246,10 @@
       }
     }
 
-    async function syncPublicationContentToPreview(options = {}) {
-      const formats = viewMode === 'compare' ? ['feed', 'story'] : [activeFormat];
+    async function syncPublicationContentToPreview({ formats = null, ...options } = {}) {
+      const targetFormats = formats || (viewMode === 'compare' ? ['feed', 'story'] : [activeFormat]);
       try {
-        const results = await Promise.all(formats.map(format => syncFormatContent(format, options)));
+        const results = await Promise.all(targetFormats.map(format => syncFormatContent(format, options)));
         return results.some(Boolean);
       } finally {
         legacyBridge?.setActiveFormat?.(activeFormat);
@@ -285,7 +309,7 @@
         });
         if (!contentApplied) return;
         assertCurrent();
-        setStatus('Pronto');
+        refreshPreviewStatus();
       } catch (error) {
         if (!isNewsImportCurrent(context) || error?.code === 'OPERATION_STALE') return;
         if (isNewsImportCurrent(context)) setStatus('NÃ£o foi possÃ­vel importar a notÃ­cia');
@@ -306,6 +330,7 @@
         controls.downloadCurrent.disabled = !ready;
       }
       refreshExportButtons();
+      refreshPreviewStatus();
     }
 
     function applySelection(selection) {
@@ -428,7 +453,7 @@
       );
       renderImageAdjustments(currentNodes().format?.capabilities);
       if (previewContexts[activeFormat].previewState !== 'ready') return;
-      syncPublicationContentToPreview().catch(error => {
+      syncPublicationContentToPreview({ formats: [activeFormat] }).catch(error => {
         if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar enquadramento:', error);
       });
     }
@@ -437,7 +462,7 @@
       publication = state.resetImageAdjustments(publication, activeFormat);
       renderImageAdjustments(currentNodes().format?.capabilities);
       if (previewContexts[activeFormat].previewState !== 'ready') return Promise.resolve(false);
-      return syncPublicationContentToPreview();
+      return syncPublicationContentToPreview({ formats: [activeFormat] });
     }
 
     function isStructuralSelectionCurrent(selection, requestId) {
@@ -499,7 +524,7 @@
       setPreviewState(format, 'loading');
       context.syncPending = true;
       legacyBridge?.setContentSyncPending?.(true, format);
-      setStatus('Atualizando preview');
+      refreshPreviewStatus();
       try {
         const resolved = await api.resolveEditorRenderer(selection);
         assertStructuralSelectionCurrent(selection, requestId);
@@ -519,7 +544,7 @@
           context.syncPending = false;
           legacyBridge?.setContentSyncPending?.(false, format);
           setPreviewState(format, 'ready');
-          setStatus('Pronto');
+          refreshPreviewStatus();
         }
         legacyBridge?.setActiveFormat?.(activeFormat);
       } catch (error) {
@@ -529,7 +554,7 @@
         context.syncPending = false;
         legacyBridge?.clearPreview?.(format);
         setPreviewState(format, 'error');
-        setStatus('Preview não pôde ser carregado');
+        refreshPreviewStatus();
       }
     }
 
@@ -574,11 +599,14 @@
       context.dimensions = null;
       context.structuralSelection = null;
       if (clear) legacyBridge?.clearPreview?.(format);
+      refreshExportButtons();
+      refreshPreviewStatus();
     }
 
     async function selectViewMode(mode) {
       if (mode !== 'compare') return selectFormat(mode);
       viewMode = 'compare';
+      refreshPreviewStatus();
       legacyBridge?.setActiveFormat?.(activeFormat);
       render();
       legacyBridge?.setActiveFormat?.(activeFormat);
@@ -618,7 +646,7 @@
       publication = state.setFormatTheme(publication, activeFormat, themeId);
       render();
       if (previewContexts[activeFormat].previewState !== 'ready') return Promise.resolve(false);
-      return syncPublicationContentToPreview().catch(error => {
+      return syncPublicationContentToPreview({ formats: [activeFormat] }).catch(error => {
         if (error?.code !== 'OPERATION_STALE') console.error('Erro ao sincronizar tema:', error);
         return false;
       });
@@ -719,6 +747,7 @@
       legacyBridge?.setNewsImportPending?.(false);
       viewMode = INITIAL_FORMAT;
       activeFormat = INITIAL_FORMAT;
+      refreshPreviewStatus();
       publication = state.createPublication();
       document.querySelectorAll('[data-field]').forEach(field => { field.value = ''; });
       const selection = catalogHelpers.chooseDefault(catalog, activeFormat);
@@ -770,6 +799,7 @@
       getViewMode: () => viewMode,
       getPreviewContexts: () => previewContexts,
       isFormatExportable,
+      refreshPreviewStatus,
       downloadCurrent,
       downloadAll,
       isExportPending: () => exportPending,

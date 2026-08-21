@@ -475,6 +475,16 @@ seleção estrutural stale, autoridade técnica de frame/manifest e inicializaç
 guarda programática dos dois downloads, filenames, mutex comum e revalidação
 antes do efeito irreversível do download.
 
+## Cobertura de status global do preview
+
+Os testes do controller exercitam a regra single e Compare, `syncPending` em
+cada formato, conclusão parcial de sincronização paralela, callback stale,
+loading, erro, reconciliação no `finally` da exportação, invalidação estrutural
+por marca/família e o loading do Story default após **Nova arte**.
+Também verificam que conteúdo compartilhado sincroniza os dois formatos, que
+tema, ajuste e reset sincronizam somente o formato ativo e que status global e
+exportabilidade individual permanecem decisões distintas.
+
 ## Resultado atual
 
 Comando:

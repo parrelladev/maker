@@ -553,6 +553,7 @@ describe('controller/UI editorial', () => {
     const reset = harness.controller.reset();
     expect(harness.controller.getPreviewState()).toBe('loading');
     expect(harness.elements.downloadCurrent.disabled).toBe(true);
+    expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
     finishReset({ template: 'renderer-default', page: 'index', themes: [] });
     await reset;
     expect(harness.controller.getPreviewState()).toBe('ready');
@@ -1212,7 +1213,7 @@ describe('controller/UI editorial', () => {
       expect(harness.legacyBridge.selectRenderer).toHaveBeenCalledTimes(initializeCalls);
     });
 
-    test('mutex compartilhado bloqueia current/all e libera no finally sem sobrescrever status', async () => {
+    test('mutex compartilhado bloqueia current/all e reconcilia status no finally', async () => {
       const harness = await readyCompare();
       let finish;
       harness.legacyBridge.downloadExport.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
@@ -1221,11 +1222,10 @@ describe('controller/UI editorial', () => {
       await harness.controller.downloadCurrent();
       await harness.controller.downloadAll();
       expect(harness.legacyBridge.downloadExport).toHaveBeenCalledTimes(1);
-      harness.elements.status.statusText.textContent = 'Atualizando preview';
       finish(true);
       await first;
       expect(harness.controller.isExportPending()).toBe(false);
-      expect(harness.elements.status.statusText.textContent).toBe('Atualizando preview');
+      expect(harness.elements.status.statusText.textContent).toBe('Pronto');
 
       harness.legacyBridge.downloadExport.mockClear();
       harness.legacyBridge.downloadExport.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
@@ -1301,12 +1301,184 @@ describe('controller/UI editorial', () => {
       expect(finishStoryResolve).toEqual(expect.any(Function));
       expect(harness.controller.isFormatExportable('feed')).toBe(false);
       expect(harness.controller.isFormatExportable('story')).toBe(false);
+      expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
 
       finishStoryResolve({
         template: 'renderer-brand-two', page: 'index',
         dimensions: { width: 1080, height: 1920 }, themes: [],
       });
       await changingBrand;
+    });
+
+    describe('status global e readiness visual', () => {
+      test('Compare não fica Pronto com Story syncPending', async () => {
+        const harness = await readyCompare();
+        harness.controller.getPreviewContexts().story.syncPending = true;
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+      });
+
+      test('Compare não fica Pronto com Feed syncPending', async () => {
+        const harness = await readyCompare();
+        harness.controller.getPreviewContexts().feed.syncPending = true;
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+      });
+
+      test('Compare fica Pronto somente com ambos ready e sem pending', async () => {
+        const harness = await readyCompare();
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
+
+      test('theme em Compare sincroniza somente o Feed ativo', async () => {
+        let finishFeed;
+        const harness = await readyCompare();
+        await harness.elements.feedPanelSelector.dispatch('click');
+        const storyTheme = harness.controller.getPublication().formats.story.theme;
+        harness.legacyBridge.applyPublicationContent.mockClear().mockImplementation(({ activeFormat }) => (
+          new Promise(resolve => {
+            expect(activeFormat).toBe('feed');
+            finishFeed = resolve;
+          })
+        ));
+
+        const changingTheme = harness.controller.selectTheme('navy');
+
+        expect(harness.controller.getPreviewContexts().feed.syncPending).toBe(true);
+        expect(harness.controller.getPreviewContexts().story.syncPending).toBe(false);
+        expect(harness.legacyBridge.applyPublicationContent).toHaveBeenCalledTimes(1);
+        expect(harness.legacyBridge.applyPublicationContent).toHaveBeenCalledWith(
+          expect.objectContaining({ activeFormat: 'feed', theme: 'navy' }),
+        );
+        expect(harness.controller.getPublication().formats.story.theme).toBe(storyTheme);
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+
+        finishFeed();
+        await changingTheme;
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
+
+      test('image adjustment e reset em Compare sincronizam somente o Story ativo', async () => {
+        let finishStory;
+        const harness = await readyCompare();
+        const feedAdjustments = { ...harness.controller.getPublication().formats.feed.imageAdjustments };
+        harness.legacyBridge.applyPublicationContent.mockClear().mockImplementation(({ activeFormat }) => (
+          new Promise(resolve => {
+            expect(activeFormat).toBe('story');
+            finishStory = resolve;
+          })
+        ));
+
+        harness.adjustmentInputs[0].value = '1.5';
+        await harness.adjustmentInputs[0].dispatch('input');
+
+        expect(harness.controller.getPreviewContexts().story.syncPending).toBe(true);
+        expect(harness.controller.getPreviewContexts().feed.syncPending).toBe(false);
+        expect(harness.legacyBridge.applyPublicationContent).toHaveBeenCalledTimes(1);
+        expect(harness.controller.getPublication().formats.feed.imageAdjustments).toEqual(feedAdjustments);
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+        finishStory();
+        await Promise.resolve(); await Promise.resolve();
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+
+        harness.legacyBridge.applyPublicationContent.mockClear().mockImplementation(({ activeFormat }) => (
+          new Promise(resolve => {
+            expect(activeFormat).toBe('story');
+            finishStory = resolve;
+          })
+        ));
+        const resetting = harness.controller.resetCurrentImageAdjustments();
+        expect(harness.controller.getPreviewContexts().story.syncPending).toBe(true);
+        expect(harness.controller.getPreviewContexts().feed.syncPending).toBe(false);
+        expect(harness.legacyBridge.applyPublicationContent).toHaveBeenCalledTimes(1);
+        expect(harness.controller.getPublication().formats.feed.imageAdjustments).toEqual(feedAdjustments);
+        finishStory();
+        await resetting;
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
+
+      test('sync paralelo só fica Pronto depois dos dois formatos', async () => {
+        let finishFeed; let finishStory;
+        const harness = await readyCompare();
+        harness.legacyBridge.applyPublicationContent.mockImplementation(({ activeFormat }) => (
+          new Promise(resolve => {
+            if (activeFormat === 'feed') finishFeed = resolve;
+            else finishStory = resolve;
+          })
+        ));
+
+        const syncing = harness.controller.syncPublicationContentToPreview();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+        finishFeed();
+        await Promise.resolve(); await Promise.resolve();
+        expect(harness.controller.getPreviewContexts().story.syncPending).toBe(true);
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+        finishStory();
+        await syncing;
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
+
+      test('Compare não fica Pronto com Feed loading', async () => {
+        const harness = await readyCompare();
+        harness.controller.getPreviewContexts().feed.previewState = 'loading';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+      });
+
+      test('Compare não fica Pronto com Story loading e volta quando coerente', async () => {
+        const harness = await readyCompare();
+        harness.controller.getPreviewContexts().story.previewState = 'loading';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+        harness.controller.getPreviewContexts().story.previewState = 'ready';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
+
+      test('Compare não fica Pronto com Feed em erro', async () => {
+        const harness = await readyCompare();
+        harness.controller.getPreviewContexts().feed.previewState = 'error';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+      });
+
+      test('Compare não fica Pronto com Story em erro e preserva o Feed', async () => {
+        const harness = await readyCompare();
+        const feedRenderer = harness.controller.getRenderer('feed');
+        harness.controller.getPreviewContexts().story.previewState = 'error';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+        expect(harness.controller.getRenderer('feed')).toBe(feedRenderer);
+        expect(harness.controller.isFormatExportable('feed')).toBe(true);
+      });
+
+      test('status global não substitui exportabilidade individual', async () => {
+        const harness = await readyCompare();
+        harness.controller.getPreviewContexts().story.previewState = 'error';
+        await harness.elements.feedPanelSelector.dispatch('click');
+        expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+        expect(harness.controller.isFormatExportable('feed')).toBe(true);
+        expect(harness.elements.downloadCurrent.disabled).toBe(false);
+        expect(harness.elements.downloadAll.disabled).toBe(true);
+      });
+
+      test('single Story ignora erro do Feed oculto', async () => {
+        const harness = setup();
+        await harness.controller.initialize();
+        harness.controller.getPreviewContexts().feed.previewState = 'error';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
+
+      test('single Feed ignora erro do Story oculto', async () => {
+        const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+        await harness.controller.initialize();
+        await harness.controller.selectFormat('feed');
+        harness.controller.getPreviewContexts().story.previewState = 'error';
+        harness.controller.refreshPreviewStatus();
+        expect(harness.elements.status.statusText.textContent).toBe('Pronto');
+      });
     });
   });
 });

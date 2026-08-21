@@ -86,8 +86,29 @@ Feed e Story são exportados diretamente dos DOMs existentes como
 `maker-feed.png` (1080×1350) e `maker-story.png` (1080×1920), sem resolver ou
 reinicializar renderers e sem alternar a visualização. Como dois downloads do
 navegador não formam uma transação, uma invalidação ocorrida depois do primeiro
-clique pode impedir o segundo e deixar somente o primeiro arquivo baixado. A
-regra textual global de status permanece reservada para a etapa 11.0.2.
+clique pode impedir o segundo e deixar somente o primeiro arquivo baixado.
+
+### Status global do preview (11.0.2)
+
+`refreshPreviewStatus()` é a autoridade do estado textual final do preview. Em
+modo single, ela considera somente o formato visível. Em Compare, Feed e Story
+precisam estar simultaneamente `ready`, sem `syncPending`, com renderer presente
+e seleção estrutural atual para que a interface mostre **Pronto**. Loading,
+erro ou indisponibilidade de um formato relevante impedem o status pronto sem
+alterar a exportabilidade individual do outro formato.
+
+Conclusões de resolve e content-sync, inclusive as paralelas em Compare, e o
+`finally` da exportação reconciliam o texto por essa função. Assim, uma operação
+antiga não consegue restaurar **Pronto** enquanto uma operação mais nova ou o
+outro formato ainda estiver pendente. Mudanças de marca/família e **Nova arte**
+invalidam a autoridade antes da primeira espera e atualizam o status
+imediatamente.
+
+O escopo do content-sync é declarado pelo chamador. Alterações do conteúdo
+compartilhado sincronizam Feed e Story em Compare; tema e ajustes de imagem
+sincronizam somente o `activeFormat`. Mesmo nesse sync visual isolado, o status
+global de Compare deixa de ser **Pronto** até o formato ativo voltar a estar
+coerente, sem colocar o outro contexto em `syncPending`.
 
 ## Capabilities editoriais e enquadramento de imagem
 
