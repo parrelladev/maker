@@ -28,7 +28,7 @@ function fixture() {
   const elements = {
     brand: new FakeElement(), family: new FakeElement(), variants: new FakeElement(), themes: new FakeElement(),
     status: new FakeElement(), newArtwork: new FakeElement(), feed: new FakeElement(), story: new FakeElement(), compare: new FakeElement(),
-    downloadCurrent: new FakeElement(), importNews: new FakeElement(),
+    downloadCurrent: new FakeElement(), downloadAll: new FakeElement(), importNews: new FakeElement(),
     imageAdjustments: new FakeElement(), resetImageAdjustments: new FakeElement(),
     previewStage: new FakeElement(), feedPanel: new FakeElement(), storyPanel: new FakeElement(),
     feedPanelSelector: new FakeElement(), storyPanelSelector: new FakeElement(),
@@ -55,6 +55,7 @@ function fixture() {
     '[data-control="variants"]': elements.variants, '[data-control="themes"]': elements.themes,
     '[data-editor-status]': elements.status, '[data-action="new-artwork"]': elements.newArtwork,
     '[data-action="download-current"]': elements.downloadCurrent,
+    '[data-action="download-all"]': elements.downloadAll,
     '[data-action="import-news"]': elements.importNews,
     '[data-control="image-adjustments"]': elements.imageAdjustments,
     '[data-action="reset-image-adjustments"]': elements.resetImageAdjustments,
@@ -138,6 +139,11 @@ function setup(overrides = {}) {
     resizePreview: jest.fn(),
     clearPreview: jest.fn(),
     reconcilePublicationContent: jest.fn(({ content }) => content),
+    isFormatExportable: jest.fn(() => true),
+    captureExportAuthority: jest.fn(format => ({ format })),
+    isExportAuthorityCurrent: jest.fn(() => true),
+    setExportPending: jest.fn(),
+    downloadExport: jest.fn().mockResolvedValue(true),
     ...overrides.legacyBridge,
   };
   const controller = EditorUi.createEditorController({
@@ -1103,5 +1109,204 @@ describe('controller/UI editorial', () => {
     expect(harness.controller.getRenderer('story').template).toBe('renderer-z');
     expect(harness.controller.getPreviewState('story')).toBe('ready');
     expect(harness.legacyBridge.clearPreview).toHaveBeenLastCalledWith('feed');
+  });
+
+  describe('exportabilidade e mutex por formato', () => {
+    async function readyCompare() {
+      const harness = setup({ api: { getEditorCatalog: jest.fn().mockResolvedValue(multiFormatCatalog) } });
+      await harness.controller.initialize();
+      await harness.controller.selectViewMode('compare');
+      harness.legacyBridge.downloadExport.mockClear();
+      return harness;
+    }
+
+    test('regra central rejeita readiness, pending, seleção stale e autoridade técnica inválida', async () => {
+      const harness = await readyCompare();
+      expect(harness.controller.isFormatExportable('feed')).toBe(true);
+
+      const context = harness.controller.getPreviewContexts().feed;
+      context.previewState = 'error';
+      expect(harness.controller.isFormatExportable('feed')).toBe(false);
+      context.previewState = 'ready';
+      context.syncPending = true;
+      expect(harness.controller.isFormatExportable('feed')).toBe(false);
+      context.syncPending = false;
+      const selection = context.structuralSelection;
+      context.structuralSelection = { ...selection, family: 'stale-family' };
+      expect(harness.controller.isFormatExportable('feed')).toBe(false);
+      context.structuralSelection = selection;
+      harness.legacyBridge.isFormatExportable.mockReturnValueOnce(false);
+      expect(harness.controller.isFormatExportable('feed')).toBe(false);
+    });
+
+    test('download current usa activeFormat em Compare e possui guarda programática', async () => {
+      const harness = await readyCompare();
+      await harness.elements.feedPanelSelector.dispatch('click');
+      await harness.controller.downloadCurrent();
+      expect(harness.legacyBridge.downloadExport).toHaveBeenCalledWith(
+        { format: 'feed' }, 'maker-feed.png', expect.any(Function),
+      );
+      harness.legacyBridge.downloadExport.mockClear();
+      harness.controller.getPreviewContexts().feed.previewState = 'error';
+      await harness.controller.downloadCurrent();
+      expect(harness.legacyBridge.downloadExport).not.toHaveBeenCalled();
+    });
+
+    test('download all exige ambos e usa authorities e filenames distintos sem resolver ou trocar formato', async () => {
+      const harness = await readyCompare();
+      const resolveCalls = harness.api.resolveEditorRenderer.mock.calls.length;
+      const activeFormat = harness.controller.getActiveFormat();
+      await harness.controller.downloadAll();
+      expect(harness.legacyBridge.downloadExport.mock.calls.map(call => call.slice(0, 2))).toEqual([
+        [{ format: 'feed' }, 'maker-feed.png'],
+        [{ format: 'story' }, 'maker-story.png'],
+      ]);
+      expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(resolveCalls);
+      expect(harness.legacyBridge.selectRenderer).toHaveBeenCalledTimes(2);
+      expect(harness.controller.getActiveFormat()).toBe(activeFormat);
+
+      harness.legacyBridge.downloadExport.mockClear();
+      harness.controller.getPreviewContexts().story.previewState = 'error';
+      await harness.controller.downloadAll();
+      expect(harness.legacyBridge.downloadExport).not.toHaveBeenCalled();
+    });
+
+    test('download all inicia zero exports quando Feed nao esta ready', async () => {
+      const harness = await readyCompare();
+      harness.controller.getPreviewContexts().feed.previewState = 'error';
+
+      await harness.controller.downloadAll();
+
+      expect(harness.controller.isFormatExportable('story')).toBe(true);
+      expect(harness.controller.isFormatExportable('feed')).toBe(false);
+      expect(harness.legacyBridge.downloadExport).not.toHaveBeenCalled();
+    });
+
+    test('download all entrega frames e manifests tecnicos exatos ao PreviewExport', async () => {
+      const previewExport = { downloadPreview: jest.fn().mockResolvedValue() };
+      const technicalContexts = {
+        feed: {
+          format: 'feed', frame: { id: 'feed-frame' },
+          manifestData: { id: 'feed-manifest', manifest: { dimensions: { width: 1080, height: 1350 } } },
+        },
+        story: {
+          format: 'story', frame: { id: 'story-frame' },
+          manifestData: { id: 'story-manifest', manifest: { dimensions: { width: 1080, height: 1920 } } },
+        },
+      };
+      const harness = await readyCompare();
+      harness.legacyBridge.captureExportAuthority.mockImplementation(format => technicalContexts[format]);
+      harness.legacyBridge.downloadExport.mockImplementation((authority, filename) => (
+        previewExport.downloadPreview(authority.frame, authority.manifestData, filename)
+      ));
+      const resolveCalls = harness.api.resolveEditorRenderer.mock.calls.length;
+      const initializeCalls = harness.legacyBridge.selectRenderer.mock.calls.length;
+
+      await harness.controller.downloadAll();
+
+      expect(previewExport.downloadPreview.mock.calls).toEqual([
+        [technicalContexts.feed.frame, technicalContexts.feed.manifestData, 'maker-feed.png'],
+        [technicalContexts.story.frame, technicalContexts.story.manifestData, 'maker-story.png'],
+      ]);
+      expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(resolveCalls);
+      expect(harness.legacyBridge.selectRenderer).toHaveBeenCalledTimes(initializeCalls);
+    });
+
+    test('mutex compartilhado bloqueia current/all e libera no finally sem sobrescrever status', async () => {
+      const harness = await readyCompare();
+      let finish;
+      harness.legacyBridge.downloadExport.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      const first = harness.controller.downloadCurrent();
+      expect(harness.controller.isExportPending()).toBe(true);
+      await harness.controller.downloadCurrent();
+      await harness.controller.downloadAll();
+      expect(harness.legacyBridge.downloadExport).toHaveBeenCalledTimes(1);
+      harness.elements.status.statusText.textContent = 'Atualizando preview';
+      finish(true);
+      await first;
+      expect(harness.controller.isExportPending()).toBe(false);
+      expect(harness.elements.status.statusText.textContent).toBe('Atualizando preview');
+
+      harness.legacyBridge.downloadExport.mockClear();
+      harness.legacyBridge.downloadExport.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      const all = harness.controller.downloadAll();
+      await harness.controller.downloadCurrent();
+      await harness.controller.downloadAll();
+      expect(harness.legacyBridge.downloadExport).toHaveBeenCalledTimes(1);
+      finish(true);
+      await all;
+      expect(harness.controller.isExportPending()).toBe(false);
+    });
+
+    test('all revalida as duas autoridades antes de cada arquivo', async () => {
+      const harness = await readyCompare();
+      harness.legacyBridge.downloadExport.mockImplementationOnce((_authority, _filename, assertCurrent) => {
+        harness.controller.getPreviewContexts().story.syncPending = true;
+        return Promise.resolve(assertCurrent());
+      });
+      await harness.controller.downloadAll();
+      expect(harness.legacyBridge.downloadExport).toHaveBeenCalledTimes(1);
+    });
+
+    test('finally libera mutex mas preserva sync real e botao bloqueado', async () => {
+      let finishExport; let finishSync;
+      const harness = setup();
+      await harness.controller.initialize();
+      harness.legacyBridge.downloadExport.mockImplementationOnce(() => (
+        new Promise(resolve => { finishExport = resolve; })
+      ));
+      const exporting = harness.controller.downloadCurrent();
+      harness.legacyBridge.applyPublicationContent.mockImplementation(({ activeFormat }) => (
+        activeFormat === 'story'
+          ? new Promise(resolve => { finishSync = resolve; })
+          : Promise.resolve()
+      ));
+      harness.fields[1].value = 'Conteudo durante export';
+      const syncing = harness.fields[1].dispatch('input');
+
+      expect(harness.controller.getPreviewContexts().story.syncPending).toBe(true);
+      expect(harness.elements.status.statusText.textContent).toBe('Atualizando preview');
+      finishExport(true);
+      await exporting;
+
+      expect(harness.controller.isExportPending()).toBe(false);
+      expect(harness.controller.isFormatExportable('story')).toBe(false);
+      expect(harness.elements.downloadCurrent.disabled).toBe(true);
+      expect(harness.elements.status.statusText.textContent).toBe('Atualizando preview');
+
+      finishSync();
+      await syncing;
+    });
+
+    test('mudanca real de brand invalida Feed e Story antes do novo resolve concluir', async () => {
+      let finishStoryResolve;
+      const harness = setup();
+      await harness.controller.initialize();
+      await harness.controller.selectViewMode('compare');
+      expect(harness.controller.isFormatExportable('feed')).toBe(true);
+      expect(harness.controller.isFormatExportable('story')).toBe(true);
+      harness.api.resolveEditorRenderer.mockImplementation(selection => {
+        if (selection.brand === 'brand-two' && selection.format === 'story') {
+          return new Promise(resolve => { finishStoryResolve = resolve; });
+        }
+        return Promise.resolve({
+          template: selection.format === 'feed' ? 'renderer-feed' : 'renderer-z',
+          page: 'index', dimensions: { width: 1080, height: 1920 }, themes: [],
+        });
+      });
+
+      const changingBrand = harness.controller.selectBrand('brand-two');
+
+      expect(harness.controller.getPublication().brand).toBe('brand-two');
+      expect(finishStoryResolve).toEqual(expect.any(Function));
+      expect(harness.controller.isFormatExportable('feed')).toBe(false);
+      expect(harness.controller.isFormatExportable('story')).toBe(false);
+
+      finishStoryResolve({
+        template: 'renderer-brand-two', page: 'index',
+        dimensions: { width: 1080, height: 1920 }, themes: [],
+      });
+      await changingBrand;
+    });
   });
 });

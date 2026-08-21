@@ -15,6 +15,7 @@
     let latestNewsImportId = 0;
     let activeFormat = INITIAL_FORMAT;
     let viewMode = INITIAL_FORMAT;
+    let exportPending = false;
 
     const controls = {
       brand: document.querySelector('[data-control="brand"]'),
@@ -23,6 +24,7 @@
       themes: document.querySelector('[data-control="themes"]'),
       status: document.querySelector('[data-editor-status]'),
       downloadCurrent: document.querySelector('[data-action="download-current"]'),
+      downloadAll: document.querySelector('[data-action="download-all"]'),
       importNews: document.querySelector('[data-action="import-news"]'),
       imageAdjustments: document.querySelector('[data-control="image-adjustments"]'),
       resetImageAdjustments: document.querySelector('[data-action="reset-image-adjustments"]'),
@@ -32,6 +34,121 @@
     function setStatus(message) {
       const target = controls.status?.querySelector('span:last-child') || controls.status;
       if (target) target.textContent = message;
+    }
+
+    function currentStructuralSelection(format) {
+      return {
+        brand: publication.brand,
+        family: publication.family,
+        variant: publication.formats[format]?.variant,
+        format,
+      };
+    }
+
+    function sameStructuralSelection(left, right) {
+      return Boolean(left && right
+        && left.brand === right.brand
+        && left.family === right.family
+        && left.variant === right.variant
+        && left.format === right.format);
+    }
+
+    function isFormatExportable(format) {
+      const context = previewContexts[format];
+      return Boolean(context
+        && context.previewState === 'ready'
+        && context.syncPending === false
+        && context.renderer
+        && sameStructuralSelection(context.structuralSelection, currentStructuralSelection(format))
+        && legacyBridge?.isFormatExportable?.(format, context.renderer));
+    }
+
+    function refreshExportButtons() {
+      if (controls.downloadCurrent) {
+        controls.downloadCurrent.disabled = exportPending || !isFormatExportable(activeFormat);
+      }
+      if (controls.downloadAll) {
+        controls.downloadAll.disabled = exportPending
+          || !isFormatExportable('feed') || !isFormatExportable('story');
+      }
+    }
+
+    function captureExportAuthority(format) {
+      if (!isFormatExportable(format)) return null;
+      const context = previewContexts[format];
+      const technicalAuthority = legacyBridge.captureExportAuthority(format);
+      if (!technicalAuthority) return null;
+      return {
+        format, context, technicalAuthority,
+        renderer: context.renderer,
+        rendererRequestId: context.rendererRequestId,
+        contentSyncId: context.contentSyncId,
+        structuralSelection: context.structuralSelection,
+      };
+    }
+
+    function isExportAuthorityCurrent(authority) {
+      if (!authority || !isFormatExportable(authority.format)) return false;
+      const context = previewContexts[authority.format];
+      return context === authority.context
+        && context.renderer === authority.renderer
+        && context.rendererRequestId === authority.rendererRequestId
+        && context.contentSyncId === authority.contentSyncId
+        && context.structuralSelection === authority.structuralSelection
+        && legacyBridge.isExportAuthorityCurrent(authority.technicalAuthority);
+    }
+
+    async function withExportLock(operation) {
+      if (exportPending) return false;
+      exportPending = true;
+      legacyBridge?.setExportPending?.(true);
+      refreshExportButtons();
+      try {
+        return await operation();
+      } catch (error) {
+        console.error('Erro ao exportar arte:', error);
+        legacyBridge?.reportExportError?.(error);
+        return false;
+      } finally {
+        exportPending = false;
+        legacyBridge?.setExportPending?.(false);
+        refreshExportButtons();
+      }
+    }
+
+    async function downloadCurrent() {
+      const format = activeFormat;
+      if (exportPending || !isFormatExportable(format)) return false;
+      const authority = captureExportAuthority(format);
+      if (!authority) return false;
+      return withExportLock(async () => {
+        if (!isExportAuthorityCurrent(authority)) return false;
+        const downloaded = await legacyBridge.downloadExport(
+          authority.technicalAuthority, `maker-${format}.png`,
+          () => isExportAuthorityCurrent(authority),
+        );
+        return downloaded !== false;
+      });
+    }
+
+    async function downloadAll() {
+      if (exportPending || !isFormatExportable('feed') || !isFormatExportable('story')) return false;
+      const feed = captureExportAuthority('feed');
+      const story = captureExportAuthority('story');
+      if (!feed || !story) return false;
+      const bothCurrent = () => isExportAuthorityCurrent(feed) && isExportAuthorityCurrent(story);
+      return withExportLock(async () => {
+        if (!bothCurrent()) return false;
+        const feedDownloaded = await legacyBridge.downloadExport(
+          feed.technicalAuthority, 'maker-feed.png', bothCurrent,
+        );
+        if (feedDownloaded === false) return false;
+        if (!bothCurrent()) return false;
+        const storyDownloaded = await legacyBridge.downloadExport(
+          story.technicalAuthority, 'maker-story.png', bothCurrent,
+        );
+        return storyDownloaded !== false;
+      });
     }
 
     function syncContentFields() {
@@ -84,6 +201,7 @@
       const assertSyncCurrent = () => assertContentSyncCurrent(syncId, format, assertCurrent);
       context.syncPending = true;
       legacyBridge?.setContentSyncPending?.(true, format);
+      refreshExportButtons();
       if (pendingStatus) setStatus(pendingStatus);
 
       try {
@@ -94,6 +212,7 @@
         assertSyncCurrent();
         context.syncPending = false;
         legacyBridge?.setContentSyncPending?.(false, format);
+        refreshExportButtons();
         if (readyStatus) setStatus(readyStatus);
         return true;
       } catch (error) {
@@ -186,6 +305,7 @@
       } else if (controls.downloadCurrent) {
         controls.downloadCurrent.disabled = !ready;
       }
+      refreshExportButtons();
     }
 
     function applySelection(selection) {
@@ -265,6 +385,7 @@
       document.querySelectorAll('[data-select-preview-format]').forEach(button => {
         button.setAttribute('aria-pressed', String(button.dataset.selectPreviewFormat === activeFormat));
       });
+      refreshExportButtons();
     }
 
     function formatLabel(format) {
@@ -563,6 +684,8 @@
         if (event.key === 'Enter') importNews();
       });
       controls.importNews?.addEventListener('click', importNews);
+      controls.downloadCurrent?.addEventListener('click', downloadCurrent);
+      controls.downloadAll?.addEventListener('click', downloadAll);
       document.querySelectorAll('[data-image-adjustment]')
         .forEach(input => input.addEventListener('input', () => updateImageAdjustment(input)));
       controls.resetImageAdjustments?.addEventListener('click', resetCurrentImageAdjustments);
@@ -646,6 +769,10 @@
       getActiveFormat: () => activeFormat,
       getViewMode: () => viewMode,
       getPreviewContexts: () => previewContexts,
+      isFormatExportable,
+      downloadCurrent,
+      downloadAll,
+      isExportPending: () => exportPending,
     };
   }
 

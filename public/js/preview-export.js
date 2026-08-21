@@ -44,7 +44,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function downloadPreview(frame, manifestData, filename = 'arte.png') {
+  async function downloadPreview(frame, manifestData, filename = 'arte.png', { assertCurrent = null } = {}) {
     const frameDocument = frame && frame.contentDocument;
     const frameWindow = frame && frame.contentWindow;
     const node = frameDocument && frameDocument.documentElement;
@@ -57,6 +57,7 @@
     if (frameDocument.fonts?.ready) await frameDocument.fonts.ready;
     await waitForImages(frameDocument);
     await verifyExportableImages(frameDocument);
+    if (assertCurrent && !assertCurrent()) return false;
 
     let blob;
     try {
@@ -81,6 +82,7 @@
     }
 
     if (!blob) throw new Error('Não foi possível converter o preview em PNG');
+    if (assertCurrent && !assertCurrent()) return false;
     downloadBlob(blob, filename);
   }
 

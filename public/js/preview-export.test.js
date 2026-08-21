@@ -138,4 +138,17 @@ describe('PreviewExport.downloadPreview', () => {
       .resolves.toBeUndefined();
     expect(harness.toBlob).toHaveBeenCalledTimes(1);
   });
+  test('revalida authority antes do download irreversivel', async () => {
+    const harness = createHarness([]);
+    const assertCurrent = jest.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+
+    await expect(harness.context.PreviewExport.downloadPreview(
+      harness.frame, {}, 'maker-story.png', { assertCurrent },
+    )).resolves.toBe(false);
+
+    expect(harness.toBlob).toHaveBeenCalledTimes(1);
+    expect(harness.link.click).not.toHaveBeenCalled();
+  });
 });

@@ -23,9 +23,8 @@ sem se invalidarem; dentro do mesmo formato, somente a versão mais recente tem
 autoridade. Conteúdo compartilhado sincroniza ambos em Compare, enquanto theme,
 variant e image adjustments sincronizam somente `activeFormat`.
 
-Esta etapa não altera o contrato final de exportação: download-all, mutex e o
-status global definitivo permanecem para as etapas 11.0.1/11.0.2. Os dois DOMs
-reais e independentes constituem a base técnica para essa evolução posterior.
+Os dois DOMs reais e independentes são a fonte direta da exportação por formato.
+O status global definitivo permanece para a etapa 11.0.2.
 
 Brand e family são compartilhados. Quando mudam, os contexts Feed e Story são
 invalidados antes de qualquer espera, suas versões antigas perdem autoridade e
@@ -73,6 +72,22 @@ antes que o preview possa ser marcado como pronto ou exportável.
 
 Tema, conteúdo e ajustes de imagem usam o mesmo sync versionado; nenhum estado
 visual pode ser considerado pronto antes de estar aplicado ao iframe.
+
+### Exportabilidade por formato (11.0.1)
+
+A regra central de exportabilidade combina o estado editorial (ready, sync
+pendente e seleção estrutural atual) com a autoridade técnica da ponte (frame,
+manifest, template/page inicializados e versão de inicialização). **Baixar
+atual** usa o formato ativo e **Baixar ambos** exige Feed e Story válidos antes
+de começar. As duas ações compartilham um mutex e capturam snapshots
+revalidados antes de cada download.
+
+Feed e Story são exportados diretamente dos DOMs existentes como
+`maker-feed.png` (1080×1350) e `maker-story.png` (1080×1920), sem resolver ou
+reinicializar renderers e sem alternar a visualização. Como dois downloads do
+navegador não formam uma transação, uma invalidação ocorrida depois do primeiro
+clique pode impedir o segundo e deixar somente o primeiro arquivo baixado. A
+regra textual global de status permanece reservada para a etapa 11.0.2.
 
 ## Capabilities editoriais e enquadramento de imagem
 

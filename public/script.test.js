@@ -518,6 +518,152 @@ describe('exportação do formato editorial visível', () => {
     await harness.run('generateArtWithPreviewFlow()');
     expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
   });
+
+  test.each([
+    ['ready false', `previewContexts.story.ready = false`],
+    ['sync pending', `contentSyncPending.story = true`],
+    ['sem frame', `previewContexts.story.frame = null`],
+    ['sem manifest', `previewContexts.story.manifestData = null`],
+    ['initialization stale', `previewContexts.story.initializedPage = 'old'`],
+  ])('bridge isFormatExportable rejeita %s', (_label, mutation) => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    configureReadyContext(harness, 'story', {
+      template: 'story-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    expect(harness.run(`window.LegacyEditorBridge.isFormatExportable('story')`)).toBe(true);
+    harness.run(mutation);
+    expect(harness.run(`window.LegacyEditorBridge.isFormatExportable('story')`)).toBe(false);
+  });
+
+  test('authority tecnica rejeita troca de initialization version', () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    configureReadyContext(harness, 'feed', {
+      template: 'feed-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    harness.run(`window.__authority = window.LegacyEditorBridge.captureExportAuthority('feed')`);
+    expect(harness.run(`window.LegacyEditorBridge.isExportAuthorityCurrent(window.__authority)`)).toBe(true);
+    harness.run(`previewContexts.feed.initializationVersion += 1`);
+    expect(harness.run(`window.LegacyEditorBridge.isExportAuthorityCurrent(window.__authority)`)).toBe(false);
+  });
+
+  test('bridge rejeita renderer editorial diferente do context tecnico', () => {
+    const harness = createHarness({ autoPrepareDownload: false });
+    configureReadyContext(harness, 'story', {
+      template: 'story-renderer', page: 'index', manifest: {}, css: [], html: ''
+    });
+    harness.context.__renderer = { template: 'renderer-antigo', page: 'index' };
+    expect(harness.run(`window.LegacyEditorBridge.isFormatExportable('story', window.__renderer)`)).toBe(false);
+  });
+});
+
+async function createIntegratedDownloadAllHarness() {
+  const harness = createHarness();
+  harness.elements.previewFrame.contentWindow.__updatePreview = jest.fn();
+  harness.elements.previewFrameFeed.contentWindow.__updatePreview = jest.fn();
+  const controls = Object.fromEntries([
+    'brand', 'family', 'variants', 'themes', 'status', 'downloadAll', 'imageAdjustments',
+    'resetImageAdjustments', 'newArtwork', 'feed', 'story', 'compare', 'feedPanel',
+    'storyPanel', 'feedSelector', 'storySelector'
+  ].map(name => [name, new BindingElement()]));
+  controls.downloadCurrent = harness.elements.generateBtn;
+  controls.importNews = harness.elements.fetchDataBtn;
+  controls.status.statusText = new BindingElement();
+  controls.status.querySelector = selector => selector === 'span:last-child' ? controls.status.statusText : null;
+  controls.feed.dataset.viewMode = 'feed'; controls.story.dataset.viewMode = 'story';
+  controls.compare.dataset.viewMode = 'compare'; controls.feedPanel.dataset.previewPanel = 'feed';
+  controls.storyPanel.dataset.previewPanel = 'story'; controls.feedSelector.dataset.selectPreviewFormat = 'feed';
+  controls.storySelector.dataset.selectPreviewFormat = 'story';
+  const fields = ['url', 'title', 'subtitle', 'tag', 'image'].map(name => {
+    const field = new BindingElement(); field.dataset.field = name; return field;
+  });
+  const selectors = {
+    '[data-control="brand"]': controls.brand, '[data-control="family"]': controls.family,
+    '[data-control="variants"]': controls.variants, '[data-control="themes"]': controls.themes,
+    '[data-editor-status]': controls.status, '[data-action="download-current"]': controls.downloadCurrent,
+    '[data-action="download-all"]': controls.downloadAll, '[data-action="import-news"]': controls.importNews,
+    '[data-control="image-adjustments"]': controls.imageAdjustments,
+    '[data-action="reset-image-adjustments"]': controls.resetImageAdjustments,
+    '[data-action="new-artwork"]': controls.newArtwork,
+  };
+  fields.forEach(field => { selectors[`[data-field="${field.dataset.field}"]`] = field; });
+  const controllerDocument = {
+    querySelector: selector => selectors[selector] || null,
+    querySelectorAll(selector) {
+      if (selector === '[data-field]') return fields;
+      if (selector === '[data-image-adjustment]') return [];
+      if (selector === '[data-view-mode]') return [controls.feed, controls.story, controls.compare];
+      if (selector === '[data-preview-panel]') return [controls.feedPanel, controls.storyPanel];
+      if (selector === '[data-select-preview-format]') return [controls.feedSelector, controls.storySelector];
+      return [];
+    },
+    createElement: () => new BindingElement(),
+  };
+  const catalog = { brands: [{ id: 'brand', name: 'Brand', families: [{
+    id: 'family', label: 'Family', variants: [{ id: 'variant', label: 'Variant', formats: [
+      { id: 'feed', dimensions: { width: 1080, height: 1350 }, themes: [] },
+      { id: 'story', dimensions: { width: 1080, height: 1920 }, themes: [] },
+    ] }],
+  }] }] };
+  const api = {
+    getEditorCatalog: jest.fn().mockResolvedValue(catalog),
+    resolveEditorRenderer: jest.fn(selection => Promise.resolve({
+      template: `${selection.format}-renderer`, page: 'index', themes: [],
+      dimensions: selection.format === 'feed'
+        ? { width: 1080, height: 1350 } : { width: 1080, height: 1920 },
+    })),
+  };
+  const controller = EditorUi.createEditorController({
+    document: controllerDocument, api, state: EditorState, catalogHelpers: EditorCatalog,
+    frontendUtils: { normalizeOptionalValue: value => value || '', isHttpUrl: () => true },
+    legacyBridge: harness.context.LegacyEditorBridge,
+  });
+  await controller.initialize();
+  await controller.selectViewMode('compare');
+  harness.context.PreviewExport.downloadPreview.mockClear();
+  harness.loadManifest.mockClear();
+  return { ...harness, api, controller, controls };
+}
+
+describe('downloadAll integrado com os previewContexts tecnicos reais', () => {
+  test('Feed invalido impede qualquer chamada final ao PreviewExport, inclusive Story', async () => {
+    const harness = await createIntegratedDownloadAllHarness();
+    harness.run(`window.LegacyEditorBridge.setEditorPreviewReady('feed', false)`);
+    await harness.controller.downloadAll();
+    expect(harness.controller.isFormatExportable('story')).toBe(true);
+    expect(harness.controller.isFormatExportable('feed')).toBe(false);
+    expect(harness.context.PreviewExport.downloadPreview).not.toHaveBeenCalled();
+  });
+
+  test('entrega os frames e manifests reais de Feed e Story sem reconstruir', async () => {
+    const harness = await createIntegratedDownloadAllHarness();
+    const feedFrame = harness.run('previewContexts.feed.frame');
+    const storyFrame = harness.run('previewContexts.story.frame');
+    const feedManifest = harness.run('previewContexts.feed.manifestData');
+    const storyManifest = harness.run('previewContexts.story.manifestData');
+    const resolveCalls = harness.api.resolveEditorRenderer.mock.calls.length;
+    const activeFormat = harness.controller.getActiveFormat();
+    const viewMode = harness.controller.getViewMode();
+    const feedWrites = harness.feedFrameDocument.write.mock.calls.length;
+    const storyWrites = harness.frameDocument.write.mock.calls.length;
+    await harness.controller.downloadAll();
+    expect(feedFrame).toBe(harness.elements.previewFrameFeed);
+    expect(storyFrame).toBe(harness.elements.previewFrame);
+    expect(feedFrame).not.toBe(storyFrame);
+    expect(feedFrame.contentWindow).not.toBe(storyFrame.contentWindow);
+    expect(feedFrame.contentWindow.document).not.toBe(storyFrame.contentWindow.document);
+    expect(harness.context.PreviewExport.downloadPreview.mock.calls).toEqual([
+      [feedFrame, feedManifest, 'maker-feed.png', expect.any(Object)],
+      [storyFrame, storyManifest, 'maker-story.png', expect.any(Object)],
+    ]);
+    expect(feedManifest.manifest.dimensions).toEqual({ width: 1080, height: 1350 });
+    expect(storyManifest.manifest.dimensions).toEqual({ width: 1080, height: 1920 });
+    expect(harness.loadManifest).not.toHaveBeenCalled();
+    expect(harness.api.resolveEditorRenderer).toHaveBeenCalledTimes(resolveCalls);
+    expect(harness.controller.getActiveFormat()).toBe(activeFormat);
+    expect(harness.controller.getViewMode()).toBe(viewMode);
+    expect(harness.feedFrameDocument.write).toHaveBeenCalledTimes(feedWrites);
+    expect(harness.frameDocument.write).toHaveBeenCalledTimes(storyWrites);
+  });
 });
 
 async function createBindingRuntimeHarness(

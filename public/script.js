@@ -206,8 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function setupEventListeners() {
-  generateBtn.addEventListener('click', generateArtWithPreviewFlow);
-
   newsUrl.addEventListener('input', () => {
     clearResolvedImageFieldState({ clearMatchingField: true });
   });
@@ -596,6 +594,38 @@ function selectRendererState(renderer, theme, activeFormat = null) {
 // Ponte temporária e única entre a seleção editorial e o estado do script legado.
 // O catálogo e a publication permanecem sob responsabilidade do novo controller.
 window.LegacyEditorBridge = {
+  isFormatExportable(format, renderer = null) {
+    const context = getReadyExportContext(format);
+    return Boolean(context
+      && (!renderer || (
+        context.template === renderer.template
+        && context.page === (renderer.page || DEFAULT_PAGE)
+      )));
+  },
+
+  captureExportAuthority,
+
+  isExportAuthorityCurrent,
+
+  setExportPending(pending) {
+    if (pending) showLoading();
+    else hideLoading();
+  },
+
+  reportExportError(error) {
+    showToast('Erro ao gerar arte: ' + error.message, 'error');
+  },
+
+  async downloadExport(authority, filename, assertCurrent) {
+    if (!isExportAuthorityCurrent(authority) || (assertCurrent && !assertCurrent())) return false;
+    return window.PreviewExport.downloadPreview(
+      authority.frame,
+      authority.manifestData,
+      filename,
+      { assertCurrent: () => isExportAuthorityCurrent(authority) && (!assertCurrent || assertCurrent()) },
+    );
+  },
+
   importNews({ url, assertCurrent }) {
     return getOrExtractNewsData(url, assertCurrent);
   },

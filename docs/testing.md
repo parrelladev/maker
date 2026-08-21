@@ -468,6 +468,13 @@ de cobertura.
 - Os testes atuais não usam rede, de modo que a passagem da suíte não valida
   disponibilidade ou comportamento de serviços externos.
 
+## Cobertura de exportação por formato
+
+Os testes de frontend cobrem exportabilidade independente de Feed e Story,
+seleção estrutural stale, autoridade técnica de frame/manifest e inicialização,
+guarda programática dos dois downloads, filenames, mutex comum e revalidação
+antes do efeito irreversível do download.
+
 ## Resultado atual
 
 Comando:
