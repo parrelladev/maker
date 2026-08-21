@@ -132,3 +132,58 @@ describe('renderers editoriais reais da A Gazeta', () => {
     expect(page.html).toContain('<!DOCTYPE html>');
   });
 });
+
+describe('caracterização do renderer legado HZ Story', () => {
+  test('preserva manifest, assets e precedência determinística dos CSS atuais', async () => {
+    const page = await loadTemplatePage('layout-hz', 'index');
+
+    expect(page.manifest).toMatchObject({
+      name: 'Layout HZ',
+      editorial: null,
+      dimensions: { width: 1080, height: 1920 },
+      logoField: 'logo',
+      defaultLogo: 'logo-hz.png',
+      bindings: [
+        { selector: '#bg', type: 'image', field: 'resolvedBg', required: true },
+        { selector: '#logo', type: 'logo', field: 'resolvedLogo', required: true },
+        { selector: '#title', type: 'text', field: 'h1' },
+        { selector: '#subtitle', type: 'text', field: 'h2' },
+        { selector: '#tag', type: 'text', field: 'tag' },
+      ],
+      attributes: [
+        { selector: '#themeStylesheet', type: 'attribute', name: 'href', field: 'themeStylesheet' },
+        { selector: 'html', type: 'attribute', name: 'data-theme', field: 'themeName' },
+      ],
+    });
+    expect(page.manifest).not.toHaveProperty('capabilities');
+    expect(page.manifest).not.toHaveProperty('defaults');
+    expect(page.manifest).not.toHaveProperty('themes');
+
+    expect(page.html).toContain('id="themeStylesheet" href="../css/theme-rosa.css"');
+    expect(page.html).toContain('id="bg"');
+    expect(page.html).toContain('id="logo"');
+    expect(page.html).toContain('id="tag"');
+    expect(page.html).toContain('id="title"');
+    expect(page.html).not.toContain('id="subtitle"');
+
+    expect(page.css.map(({ name }) => name)).toEqual([
+      path.join('css', 'base.css'),
+      path.join('css', 'theme-amarelo.css'),
+      path.join('css', 'theme-rosa.css'),
+    ]);
+    expect(page.css[0].content).toContain("font-family: 'Maga Black'");
+    expect(page.css[0].content).toContain('padding-top: 1100px');
+    expect(page.css[1].content).toContain('--bg-top: #e39303');
+    expect(page.css[2].content).toContain('--bg-top: #ff0053');
+
+    const aggregatedCss = page.css.map(({ content }) => content).join('\n');
+    expect(aggregatedCss.lastIndexOf('--bg-top: #ff0053'))
+      .toBeGreaterThan(aggregatedCss.lastIndexOf('--bg-top: #e39303'));
+    expect(page.resolvedLogo).toEqual({ kind: 'image', src: '/input/logo-hz.png' });
+
+    const logo = await fs.readFile(path.resolve('input/logo-hz.png'));
+    expect(logo.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(logo.readUInt32BE(16)).toBe(2697);
+    expect(logo.readUInt32BE(20)).toBe(1080);
+  });
+});

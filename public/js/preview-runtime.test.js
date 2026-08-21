@@ -129,3 +129,73 @@ test('top-level capabilities are ignored when a multi-format manifest has no act
   });
   expect(image.style.transform).toBe('scale(1)');
 });
+
+test('renderer HZ legado aplica payload e themes sem criar o subtitle ausente', () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    path.resolve('templates/layout-hz/index/manifest.json'), 'utf8'
+  ));
+  const html = fs.readFileSync(path.resolve('templates/layout-hz/index/index.html'), 'utf8');
+  const elements = {
+    '#bg': { tagName: 'IMG', style: { transform: 'translateX(-50%)' }, src: '' },
+    '#logo': { tagName: 'DIV', style: {}, innerHTML: '' },
+    '#title': { tagName: 'H1', style: {}, textContent: '' },
+    '#tag': { tagName: 'SPAN', style: {}, textContent: '' },
+    '#themeStylesheet': {
+      tagName: 'LINK', style: {}, attributes: { href: '../css/theme-rosa.css' },
+      setAttribute(name, value) { this.attributes[name] = value; },
+    },
+    html: {
+      tagName: 'HTML', style: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = value; },
+    },
+  };
+  const context = {
+    document: {
+      documentElement: elements.html,
+      body: { style: {} },
+      querySelectorAll: selector => elements[selector] ? [elements[selector]] : [],
+    },
+    innerWidth: 1080,
+    innerHeight: 1920,
+    addEventListener: jest.fn(),
+    setTimeout: jest.fn(),
+    console,
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, 'preview-runtime.js'), 'utf8'), context);
+  context.PreviewRuntime.initialize(manifest);
+
+  expect(html).not.toContain('id="subtitle"');
+  expect(() => context.PreviewRuntime.update({
+    resolvedBg: 'data:image/png;base64,SU1BR0VN',
+    resolvedLogo: { kind: 'image', src: '/input/logo-hz.png' },
+    h1: 'TÍTULO HZ CONTROLADO',
+    h2: 'SUBTÍTULO HZ SEM ELEMENTO',
+    tag: 'TAG HZ CONTROLADA',
+    themeName: 'rosa',
+    themeStylesheet: '../css/theme-rosa.css',
+    imageAdjustments: { zoom: 2, x: 10, y: 90 },
+  })).not.toThrow();
+
+  expect(elements['#bg'].src).toBe('data:image/png;base64,SU1BR0VN');
+  expect(elements['#logo'].style.backgroundImage).toBe('url(/input/logo-hz.png)');
+  expect(elements['#title'].textContent).toBe('TÍTULO HZ CONTROLADO');
+  expect(elements['#tag'].textContent).toBe('TAG HZ CONTROLADA');
+  expect(elements['#themeStylesheet'].attributes.href).toBe('../css/theme-rosa.css');
+  expect(elements.html.attributes['data-theme']).toBe('rosa');
+  expect(elements['#bg'].style).toMatchObject({
+    objectPosition: '50% 50%',
+    transformOrigin: '50% 50%',
+    transform: 'scale(1)',
+  });
+
+  context.PreviewRuntime.update({
+    themeName: 'amarelo',
+    themeStylesheet: '../css/theme-amarelo.css',
+  });
+  expect(elements['#themeStylesheet'].attributes.href).toBe('../css/theme-amarelo.css');
+  expect(elements.html.attributes['data-theme']).toBe('amarelo');
+  expect(elements['#title'].textContent).toBe('TÍTULO HZ CONTROLADO');
+  expect(elements['#tag'].textContent).toBe('TAG HZ CONTROLADA');
+});

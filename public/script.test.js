@@ -1,9 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const cheerio = require('cheerio');
 const EditorUi = require('./js/editor-ui');
 const EditorState = require('./js/editor-state');
 const EditorCatalog = require('./js/editor-catalog');
+const { loadTemplatePage } = require('../src/services/templatePageService');
 
 function createDeferred() {
   let resolve;
@@ -596,6 +598,119 @@ async function createReadyBindingRuntimeHarness(
 }
 
 describe('runtime de bindings carregado por public/script.js', () => {
+  test('HZ preserva precedência estrutural de theme e não aguarda o stylesheet para readiness', async () => {
+    const page = await loadTemplatePage('layout-hz', 'index');
+    const harness = createHarness({ autoPrepareDownload: false, autoResolveRuntime: false });
+    harness.loadManifest.mockResolvedValue(page);
+    harness.run(`selectRendererState({ template: 'layout-hz', page: 'index', themes: [] }, 'rosa')`);
+    const documentWritten = createDeferred();
+    harness.frameDocument.write.mockImplementation(html => documentWritten.resolve(html));
+
+    const initialization = harness.run('ensurePreviewInitialized()');
+    let ready = false;
+    initialization.then(() => { ready = true; });
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    const iframeHtml = await documentWritten.promise;
+    const $ = cheerio.load(iframeHtml);
+    const aggregateStyle = $('style').filter((_, element) => (
+      $(element).html().includes('--bg-top: #e39303')
+      && $(element).html().includes('--bg-top: #ff0053')
+    )).first();
+    const themeLink = $('#themeStylesheet');
+
+    expect($('html')).toHaveLength(1);
+    expect($('head')).toHaveLength(1);
+    expect($('body')).toHaveLength(1);
+    expect(aggregateStyle).toHaveLength(1);
+    expect(aggregateStyle.parent().is('head')).toBe(true);
+    expect(themeLink).toHaveLength(1);
+    expect(themeLink.parent().is('body')).toBe(true);
+    expect($('*').index(aggregateStyle)).toBeLessThan($('*').index(themeLink));
+    expect(themeLink.attr('href')).toBe('../css/theme-rosa.css');
+    expect(aggregateStyle.html().lastIndexOf('--bg-top: #ff0053'))
+      .toBeGreaterThan(aggregateStyle.html().lastIndexOf('--bg-top: #e39303'));
+
+    const aggregateBeforeThemeChange = aggregateStyle.html();
+    const themeLinkNode = themeLink[0];
+    const prepareElement = element => {
+      if (!element.style) element.style = {};
+      if (!element.setAttribute) {
+        element.setAttribute = function setAttribute(name, value) {
+          this.attribs = this.attribs || {};
+          this.attribs[name] = String(value);
+        };
+      }
+      if (!element.tagName && element.name) element.tagName = element.name.toUpperCase();
+      return element;
+    };
+    $('*').toArray().forEach(prepareElement);
+    const parsedDocument = {
+      documentElement: prepareElement($('html')[0]),
+      body: prepareElement($('body')[0]),
+      head: prepareElement($('head')[0]),
+      createElement(tagName) {
+        return new BindingElement(tagName);
+      },
+      querySelectorAll(selector) {
+        return $(selector).toArray().map(prepareElement);
+      },
+    };
+    parsedDocument.head.children = [];
+    parsedDocument.head.appendChild = function appendChild(child) {
+      this.children.push(child);
+      return child;
+    };
+    parsedDocument.documentElement.clientWidth = 1080;
+    parsedDocument.documentElement.clientHeight = 1920;
+    const runtimeContext = {
+      console,
+      document: parsedDocument,
+      innerWidth: 1080,
+      innerHeight: 1920,
+      addEventListener: jest.fn(),
+      setTimeout: jest.fn(),
+    };
+    runtimeContext.__resolvePreviewRuntimeReady = harness.elements.previewFrame.contentWindow
+      .__resolvePreviewRuntimeReady;
+    runtimeContext.__rejectPreviewRuntimeReady = harness.elements.previewFrame.contentWindow
+      .__rejectPreviewRuntimeReady;
+    runtimeContext.window = runtimeContext;
+    vm.createContext(runtimeContext);
+    const inlineScripts = Array.from(
+      iframeHtml.matchAll(/<script>([\s\S]*?)<\/script>/g),
+      match => match[1]
+    );
+    expect(inlineScripts).toHaveLength(1);
+    vm.runInContext(inlineScripts[0], runtimeContext, {
+      filename: 'preview-runtime-bootstrap-hz.js',
+    });
+    const runtimeScript = parsedDocument.head.children.at(-1);
+    expect(runtimeScript.src).toBe('/js/preview-runtime.js');
+    expect(ready).toBe(false);
+    vm.runInContext(
+      fs.readFileSync(path.join(__dirname, 'js', 'preview-runtime.js'), 'utf8'),
+      runtimeContext
+    );
+    runtimeScript.dispatch('load');
+    await expect(initialization).resolves.toMatchObject({
+      template: 'layout-hz',
+      page: 'index',
+    });
+    expect(ready).toBe(true);
+    runtimeContext.PreviewRuntime.update({
+      themeName: 'amarelo',
+      themeStylesheet: '../css/theme-amarelo.css',
+    });
+
+    expect($('#themeStylesheet')[0]).toBe(themeLinkNode);
+    expect($('#themeStylesheet').attr('href')).toBe('../css/theme-amarelo.css');
+    expect($('html').attr('data-theme')).toBe('amarelo');
+    expect(aggregateStyle.html()).toBe(aggregateBeforeThemeChange);
+    expect($('*').index(aggregateStyle)).toBeLessThan($('*').index($('#themeStylesheet')));
+    expect(themeLinkNode).not.toHaveProperty('listeners');
+  });
+
   test('mantém readiness pendente até carregar, inicializar e drenar a fila', async () => {
     const target = new BindingElement();
     const runtime = await createBindingRuntimeHarness({
