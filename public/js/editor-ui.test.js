@@ -155,7 +155,7 @@ function setup(overrides = {}) {
 }
 
 describe('controller/UI editorial', () => {
-  test('descobre HZ pelo catalogo, preserva conteudo e oferece somente Story com Rosa default', async () => {
+  test('preserva publication completa em A Gazeta -> HZ -> A Gazeta e entrega o conteudo ao Story HZ', async () => {
     const catalog = { brands: [{
       id: 'agazeta', name: 'A Gazeta', families: [{
         id: 'padrao', label: 'padrao', variants: [{
@@ -183,21 +183,32 @@ describe('controller/UI editorial', () => {
       })),
     } });
     await harness.controller.initialize();
-    harness.fields[1].value = 'Titulo compartilhado';
-    await harness.fields[1].dispatch('input');
+    const content = {
+      url: 'https://example.test/noticia-hz-gate',
+      title: 'TITULO PRESERVADO 14.5A',
+      subtitle: 'SUBTITULO PRESERVADO 14.5A',
+      tag: 'TAG PRESERVADA 14.5A',
+      image: 'data:image/png;base64,aHzGateFixture',
+    };
+    for (const field of harness.fields) {
+      field.value = content[field.dataset.field];
+      await field.dispatch('input');
+    }
+    const initialContent = { ...harness.controller.getPublication().content };
     await harness.controller.selectBrand('hz');
 
     expect(harness.elements.brand.children.map(option => option.value)).toEqual(['agazeta', 'hz']);
     expect(harness.controller.getPublication()).toMatchObject({
-      brand: 'hz', family: 'noticia', content: { title: 'Titulo compartilhado' },
+      brand: 'hz', family: 'noticia', content,
       formats: { story: { variant: 'foto-card', theme: 'rosa' } },
     });
+    expect(harness.controller.getPublication().content).toEqual(initialContent);
     expect(harness.elements.themes.children.map(button => button.dataset.themeId))
       .toEqual(['rosa', 'amarelo']);
     expect(harness.legacyBridge.selectRenderer).toHaveBeenLastCalledWith(expect.objectContaining({
       renderer: expect.objectContaining({ template: 'layout-hz', page: 'index' }),
       activeFormat: 'story', theme: 'rosa',
-      content: expect.objectContaining({ title: 'Titulo compartilhado' }),
+      content,
     }));
     await harness.controller.selectTheme('amarelo');
     expect(harness.controller.getPublication().formats.story.theme).toBe('amarelo');
@@ -206,6 +217,14 @@ describe('controller/UI editorial', () => {
     expect(harness.elements.status.statusText.textContent).toContain('Feed não disponível');
     await expect(harness.controller.downloadAll()).resolves.toBe(false);
     expect(harness.legacyBridge.downloadExport).not.toHaveBeenCalled();
+
+    await harness.controller.selectFormat('story');
+    await harness.controller.selectBrand('agazeta');
+    expect(harness.controller.getPublication()).toMatchObject({
+      brand: 'agazeta', family: 'padrao', content,
+      formats: { story: { variant: 'foto-acima', theme: 'azul' } },
+    });
+    expect(harness.controller.getPublication().content).toEqual(initialContent);
   });
 
   test('mostra controles suportados, altera publication e reseta sem resolver renderer', async () => {
@@ -1144,6 +1163,73 @@ describe('controller/UI editorial', () => {
     expect(harness.controller.getRenderer('story')).toBe(storyRenderer);
     expect(harness.controller.getPreviewState('feed')).toBe('ready');
     expect(harness.controller.getPreviewState('story')).toBe('ready');
+  });
+
+  test('A Gazeta Feed ready perde autoridade ao trocar para HZ Story-only e entrar em Compare', async () => {
+    const catalog = { brands: [{
+      id: 'agazeta', name: 'A Gazeta', families: [{
+        id: 'padrao', label: 'padrao', variants: [{
+          id: 'foto-acima', label: 'Foto acima', formats: [
+            { id: 'feed', dimensions: { width: 1080, height: 1350 }, themes: [{ id: 'azul', label: 'Azul' }] },
+            { id: 'story', dimensions: { width: 1080, height: 1920 }, themes: [{ id: 'azul', label: 'Azul' }] },
+          ],
+        }],
+      }],
+    }, {
+      id: 'hz', name: 'HZ', families: [{
+        id: 'noticia', label: 'noticia', variants: [{
+          id: 'foto-card', label: 'Foto card', formats: [{
+            id: 'story', dimensions: { width: 1080, height: 1920 },
+            themes: [{ id: 'rosa', label: 'Rosa' }, { id: 'amarelo', label: 'Amarelo' }],
+          }],
+        }],
+      }],
+    }] };
+    const harness = setup({ api: {
+      getEditorCatalog: jest.fn().mockResolvedValue(catalog),
+      resolveEditorRenderer: jest.fn(selection => Promise.resolve({
+        template: selection.brand === 'hz' ? 'layout-hz' : `agazeta-${selection.format}`,
+        page: 'index',
+        dimensions: selection.format === 'feed'
+          ? { width: 1080, height: 1350 }
+          : { width: 1080, height: 1920 },
+        themes: [],
+      })),
+    } });
+    await harness.controller.initialize();
+    await harness.controller.selectViewMode('compare');
+
+    expect(harness.controller.getRenderer('feed')).toMatchObject({ template: 'agazeta-feed' });
+    expect(harness.controller.getPreviewContexts().feed).toMatchObject({
+      previewState: 'ready', syncPending: false,
+      structuralSelection: {
+        brand: 'agazeta', family: 'padrao', variant: 'foto-acima', format: 'feed',
+      },
+    });
+    expect(harness.controller.isFormatExportable('feed')).toBe(true);
+    const oldFeedAssertCurrent = harness.legacyBridge.selectRenderer.mock.calls
+      .find(([request]) => request.activeFormat === 'feed')[0].assertCurrent;
+
+    await harness.controller.selectBrand('hz');
+
+    expect(harness.controller.getPublication()).toMatchObject({
+      brand: 'hz', family: 'noticia', formats: { story: { variant: 'foto-card' } },
+    });
+    expect(harness.controller.getRenderer('story')).toMatchObject({ template: 'layout-hz' });
+    expect(harness.controller.getPreviewContexts().feed).toMatchObject({
+      renderer: null, previewState: 'error', syncPending: false, structuralSelection: null,
+    });
+    expect(harness.controller.isFormatExportable('feed')).toBe(false);
+    expect(harness.controller.isFormatExportable('story')).toBe(true);
+    expect(() => oldFeedAssertCurrent()).toThrow(expect.objectContaining({ code: 'OPERATION_STALE' }));
+    expect(harness.controller.getViewMode()).toBe('compare');
+    expect(harness.elements.status.statusText.textContent).not.toBe('Pronto');
+    expect(harness.elements.downloadAll.disabled).toBe(true);
+    expect(harness.legacyBridge.clearPreview).toHaveBeenCalledWith('feed');
+
+    harness.legacyBridge.downloadExport.mockClear();
+    await expect(harness.controller.downloadAll()).resolves.toBe(false);
+    expect(harness.legacyBridge.downloadExport).not.toHaveBeenCalled();
   });
 
   test('Compare panel selection changes activeFormat and sidebar target', async () => {

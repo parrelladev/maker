@@ -698,6 +698,19 @@ describe('runtime de bindings carregado por public/script.js', () => {
       page: 'index',
     });
     expect(ready).toBe(true);
+    await runtimeContext.PreviewRuntime.update({
+      h1: 'TITULO PRESERVADO 14.5A',
+      h2: 'SUBTITULO PRESERVADO 14.5A',
+      tag: 'TAG PRESERVADA 14.5A',
+      resolvedBg: 'data:image/png;base64,aHzGateFixture',
+    });
+    expect($('#title')[0].textContent).toBe('TITULO PRESERVADO 14.5A');
+    expect($('#tag')[0].textContent).toBe('TAG PRESERVADA 14.5A');
+    expect($('#bg')[0].src).toBe('data:image/png;base64,aHzGateFixture');
+    expect($('#subtitle')).toHaveLength(0);
+    expect(page.manifest.bindings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: 'h2' }),
+    ]));
     runtimeContext.PreviewRuntime.update({
       themeName: 'amarelo',
       themeStylesheet: '../css/theme-amarelo.css',
